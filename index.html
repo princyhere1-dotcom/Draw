@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pictionary Canvas</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; background: #f0f0f0; overflow: hidden; }
+        #tools { padding: 10px; display: flex; gap: 10px; background: white; width: 100%; justify-content: center; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); }
+        canvas { background: white; touch-action: none; border-bottom: 2px solid #ddd; }
+        button { padding: 8px 15px; font-size: 14px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        input[type="color"] { border: none; width: 40px; height: 40px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="tools">
+        <input type="color" id="colorPicker" value="#000000">
+        <input type="range" id="brushSize" min="1" max="25" value="5">
+        <button id="eraser" style="background: #ffb6c1; color: black;">Eraser</button>
+        <button id="clear" style="background: #ff4d4d; color: white;">Clear</button>
+    </div>
+    <canvas id="board"></canvas>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        
+        const canvas = document.getElementById('board');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight - 60; // Leave room for tools
+
+        // Fill white background initially so screenshots aren't transparent
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        let drawing = false;
+        let color = '#000000';
+        let size = 5;
+
+        document.getElementById('colorPicker').onchange = (e) => { color = e.target.value; };
+        document.getElementById('brushSize').onchange = (e) => { size = e.target.value; };
+        document.getElementById('eraser').onclick = () => { color = '#ffffff'; };
+        document.getElementById('clear').onclick = () => { 
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, canvas.width, canvas.height); 
+        };
+
+        function startDraw(e) {
+            drawing = true;
+            ctx.beginPath();
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+            const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+            ctx.moveTo(x, y);
+        }
+
+        function draw(e) {
+            if (!drawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+            const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+            ctx.lineTo(x, y);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = size;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+        }
+
+        function stopDraw() { drawing = false; }
+
+        canvas.addEventListener('mousedown', startDraw);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDraw);
+        canvas.addEventListener('touchstart', startDraw);
+        canvas.addEventListener('touchmove', draw);
+        canvas.addEventListener('touchend', stopDraw);
+
+        // 20-Second Snapshot Sender (Draft logic for next phase)
+        setInterval(() => {
+            const imgData = canvas.toDataURL('image/jpeg', 0.6);
+            // In the next step, we will add the fetch() POST request here to send imgData to the bot
+            console.log("Snapshot captured and ready to send to bot server");
+        }, 20000);
+    </script>
+</body>
+</html>
