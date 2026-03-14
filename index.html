@@ -46,7 +46,15 @@
     </div>
 
     <script>
-        const BACKEND_URL = "https://corsproxy.io/?http://217.154.212.66:12179"; 
+        // --- NEW PROXY SETUP ---
+        const BASE_IP = "217.154.212.66";
+        const BASE_PORT = "12179";
+        const TARGET_SERVER = `http://${BASE_IP}:${BASE_PORT}`;
+        
+        // Using CodeTabs API which reliably allows POST requests and ignores CORS checks
+        function getProxyUrl(path) {
+            return `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(TARGET_SERVER + path)}`;
+        }
         
         const tg = window.Telegram.WebApp;
         tg.expand();
@@ -102,7 +110,7 @@
             syncText.innerText = "🔵 Receiving...";
             
             setInterval(() => {
-                fetch(`${BACKEND_URL}/drawing?chat_id=${chatId}`)
+                fetch(getProxyUrl(`/drawing?chat_id=${chatId}`))
                 .then(r => r.json())
                 .then(data => {
                     if(data.image) {
@@ -114,8 +122,8 @@
                         }
                         syncText.innerText = "🟢 Live";
                     }
-                }).catch(e => { syncText.innerText = "🔴 Proxy Blocked Viewer"; });
-            }, 2000);
+                }).catch(e => { syncText.innerText = "🔴 Proxy Error (Viewer)"; });
+            }, 3000);
             initZoom(); 
         } else {
             // DRAWERS
@@ -123,16 +131,18 @@
             initZoom();
             
             setInterval(() => {
-                fetch(`${BACKEND_URL}/upload`, {
+                // Send as text/plain to completely bypass the proxy's strict CORS preflight checks
+                fetch(getProxyUrl(`/upload`), {
                     method: 'POST',
-                    body: JSON.stringify({ chat_id: chatId, image: canvas.toDataURL('image/jpeg', 0.4) }) // Slightly lower quality to ensure it passes through proxy
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify({ chat_id: chatId, image: canvas.toDataURL('image/jpeg', 0.4) })
                 })
                 .then(r => {
                     if(r.ok) syncText.innerText = "🟢 Live (Sent)";
                     else syncText.innerText = "🔴 Proxy Error " + r.status;
                 })
                 .catch(e => { syncText.innerText = "🔴 Proxy Blocked Request"; });
-            }, 3000); // Send every 3s to save bandwidth
+            }, 3000); 
         }
 
         let drawing = false;
