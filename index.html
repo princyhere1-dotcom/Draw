@@ -1,86 +1,202 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pictionary Canvas</title>
+    <title>Pictionary Pro</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; background: #f0f0f0; overflow: hidden; }
-        #tools { padding: 10px; display: flex; gap: 10px; background: white; width: 100%; justify-content: center; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); }
-        canvas { background: white; touch-action: none; border-bottom: 2px solid #ddd; }
-        button { padding: 8px 15px; font-size: 14px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        input[type="color"] { border: none; width: 40px; height: 40px; cursor: pointer; }
+        body { margin: 0; padding: 0; background: #e0e0e0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; font-family: sans-serif; }
+        #viewer-overlay { display: none; background: #ff4d4d; color: white; padding: 10px; text-align: center; font-weight: bold; z-index: 20; }
+        #canvas-container { flex: 1; overflow: hidden; position: relative; background: white; touch-action: none; }
+        canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+        
+        #toolbar { background: white; padding: 10px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 10; border-top: 1px solid #ccc; }
+        button, select, input { padding: 8px; border-radius: 5px; border: 1px solid #ccc; font-weight: bold; }
+        input[type="color"] { width: 40px; height: 40px; padding: 0; cursor: pointer; }
     </style>
 </head>
 <body>
-    <div id="tools">
-        <input type="color" id="colorPicker" value="#000000">
-        <input type="range" id="brushSize" min="1" max="25" value="5">
-        <button id="eraser" style="background: #ffb6c1; color: black;">Eraser</button>
-        <button id="clear" style="background: #ff4d4d; color: white;">Clear</button>
+    <div id="viewer-overlay">👁️ VIEWER MODE: You are watching the live drawing</div>
+    <div id="canvas-container">
+        <canvas id="board"></canvas>
     </div>
-    <canvas id="board"></canvas>
+    
+    <div id="toolbar">
+        <input type="color" id="colorPicker" value="#000000">
+        <input type="range" id="brushSize" min="1" max="30" value="5">
+        <select id="toolSelect">
+            <option value="solid">Solid Brush</option>
+            <option value="airbrush">Airbrush</option>
+            <option value="eraser">Eraser</option>
+            <option value="line">Straight Line</option>
+            <option value="rect">Rectangle</option>
+            <option value="circle">Circle</option>
+            <option value="oval">Oval</option>
+            <option value="triangle">Triangle</option>
+        </select>
+        <button id="undoBtn">↩️ Undo</button>
+        <button id="redoBtn">↪️ Redo</button>
+        <button id="clearBtn" style="background: #ff4d4d; color: white; border: none;">🗑️ Clear</button>
+    </div>
 
     <script>
+        // --- IMPORTANT: CHANGE THIS URL ---
+        const BACKEND_URL = "http://YOUR_WISPBYTE_IP:8080"; 
+        
         const tg = window.Telegram.WebApp;
         tg.expand();
         
+        const urlParams = new URLSearchParams(window.location.search);
+        const chatId = urlParams.get('chat_id');
+        const drawerId = parseInt(urlParams.get('uid')); // Passed from Python WebAppInfo URL
+        const actualUserId = tg.initDataUnsafe?.user?.id || 0; 
+        
+        const isDrawer = (actualUserId === drawerId || actualUserId === 0); // If 0 (desktop fallback), assume drawer for testing
+
         const canvas = document.getElementById('board');
         const ctx = canvas.getContext('2d');
+        const container = document.getElementById('canvas-container');
+        
         canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight - 60; // Leave room for tools
-
-        // Fill white background initially so screenshots aren't transparent
+        canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+        
         ctx.fillStyle = "white";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+        // State Tracking for Undo/Redo
+        let history = [canvas.toDataURL()];
+        let historyStep = 0;
+
+        function saveState() {
+            historyStep++;
+            history = history.slice(0, historyStep);
+            history.push(canvas.toDataURL());
+        }
+
+        function restoreState(step) {
+            let img = new Image();
+            img.src = history[step];
+            img.onload = () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+            }
+        }
+
+        document.getElementById('undoBtn').onclick = () => { if(historyStep > 0) restoreState(--historyStep); };
+        document.getElementById('redoBtn').onclick = () => { if(historyStep < history.length - 1) restoreState(++historyStep); };
+        document.getElementById('clearBtn').onclick = () => { ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height); saveState(); };
+
+        if (!isDrawer) {
+            document.getElementById('toolbar').style.display = 'none';
+            document.getElementById('viewer-overlay').style.display = 'block';
+            canvas.style.height = window.innerHeight + "px"; // Extend canvas since toolbar is gone
+            
+            // Viewer Live Polling (Grabs from python server every 2s)
+            setInterval(() => {
+                fetch(`${BACKEND_URL}/drawing?chat_id=${chatId}`)
+                .then(r => r.json())
+                .then(data => {
+                    if(data.image) {
+                        let img = new Image();
+                        img.src = data.image;
+                        img.onload = () => {
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            ctx.drawImage(img, 0, 0);
+                        }
+                    }
+                }).catch(e => console.log("Viewer Sync Error:", e));
+            }, 2000);
+            
+            initZoom(); // Viewers can still zoom to see details
+        } else {
+            initDrawing();
+            initZoom();
+            // Drawer Live Syncing (Sends to python server every 2s)
+            setInterval(() => {
+                fetch(`${BACKEND_URL}/upload`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: chatId, image: canvas.toDataURL('image/jpeg', 0.6) })
+                }).catch(e => console.log("Drawer Sync Error:", e));
+            }, 2000);
+        }
+
+        // --- DRAWING LOGIC ---
         let drawing = false;
-        let color = '#000000';
-        let size = 5;
+        let startX, startY;
+        let tempCanvas = document.createElement('canvas');
+        tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
+        let tempCtx = tempCanvas.getContext('2d');
 
-        document.getElementById('colorPicker').onchange = (e) => { color = e.target.value; };
-        document.getElementById('brushSize').onchange = (e) => { size = e.target.value; };
-        document.getElementById('eraser').onclick = () => { color = '#ffffff'; };
-        document.getElementById('clear').onclick = () => { 
-            ctx.fillStyle = "white";
-            ctx.fillRect(0, 0, canvas.width, canvas.height); 
-        };
+        function initDrawing() {
+            container.addEventListener('pointerdown', (e) => {
+                if (e.touches && e.touches.length > 1) return; // Allow 2 fingers to zoom instead
+                drawing = true;
+                const rect = canvas.getBoundingClientRect();
+                startX = (e.clientX - rect.left) / scale;
+                startY = (e.clientY - rect.top) / scale;
+                tempCtx.drawImage(canvas, 0, 0); // Save snapshot for shapes
+            });
 
-        function startDraw(e) {
-            drawing = true;
-            ctx.beginPath();
-            const rect = canvas.getBoundingClientRect();
-            const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-            const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-            ctx.moveTo(x, y);
+            container.addEventListener('pointermove', (e) => {
+                if (!drawing) return;
+                const rect = canvas.getBoundingClientRect();
+                const currentX = (e.clientX - rect.left) / scale;
+                const currentY = (e.clientY - rect.top) / scale;
+                
+                let tool = document.getElementById('toolSelect').value;
+                let color = tool === 'eraser' ? 'white' : document.getElementById('colorPicker').value;
+                let size = document.getElementById('brushSize').value;
+
+                ctx.strokeStyle = color;
+                ctx.fillStyle = color;
+                ctx.lineWidth = size;
+                ctx.lineCap = 'round';
+
+                if (['solid', 'airbrush', 'eraser'].includes(tool)) {
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(currentX, currentY);
+                    if(tool === 'airbrush') { ctx.shadowBlur = size * 2; ctx.shadowColor = color; } 
+                    else { ctx.shadowBlur = 0; }
+                    ctx.stroke();
+                    startX = currentX; startY = currentY;
+                } else {
+                    // Shapes require redrawing over the saved snapshot
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(tempCanvas, 0, 0);
+                    ctx.beginPath();
+                    if (tool === 'line') { ctx.moveTo(startX, startY); ctx.lineTo(currentX, currentY); ctx.stroke(); }
+                    if (tool === 'rect') { ctx.rect(startX, startY, currentX - startX, currentY - startY); ctx.stroke(); }
+                    if (tool === 'circle') { ctx.arc(startX, startY, Math.abs(currentX - startX), 0, Math.PI * 2); ctx.stroke(); }
+                    if (tool === 'oval') { ctx.ellipse(startX, startY, Math.abs(currentX - startX), Math.abs(currentY - startY), 0, 0, Math.PI * 2); ctx.stroke(); }
+                    if (tool === 'triangle') { ctx.moveTo(startX, startY); ctx.lineTo(currentX, currentY); ctx.lineTo(startX - (currentX - startX), currentY); ctx.closePath(); ctx.stroke(); }
+                }
+            });
+
+            container.addEventListener('pointerup', () => { if(drawing) { drawing = false; saveState(); ctx.shadowBlur = 0; } });
         }
 
-        function draw(e) {
-            if (!drawing) return;
-            const rect = canvas.getBoundingClientRect();
-            const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-            const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-            ctx.lineTo(x, y);
-            ctx.strokeStyle = color;
-            ctx.lineWidth = size;
-            ctx.lineCap = 'round';
-            ctx.stroke();
+        // --- PINCH TO ZOOM LOGIC ---
+        let scale = 1;
+        function initZoom() {
+            let initialDistance = null;
+            container.addEventListener('touchstart', e => {
+                if (e.touches.length === 2) {
+                    drawing = false;
+                    initialDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                }
+            });
+            container.addEventListener('touchmove', e => {
+                if (e.touches.length === 2 && initialDistance) {
+                    e.preventDefault();
+                    let currentDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                    scale = Math.min(Math.max(1, scale * (currentDistance / initialDistance)), 3); // Max zoom 3x
+                    canvas.style.transform = `scale(${scale})`;
+                    initialDistance = currentDistance;
+                }
+            });
+            container.addEventListener('touchend', () => { initialDistance = null; });
         }
-
-        function stopDraw() { drawing = false; }
-
-        canvas.addEventListener('mousedown', startDraw);
-        canvas.addEventListener('mousemove', draw);
-        canvas.addEventListener('mouseup', stopDraw);
-        canvas.addEventListener('touchstart', startDraw);
-        canvas.addEventListener('touchmove', draw);
-        canvas.addEventListener('touchend', stopDraw);
-
-        // 20-Second Snapshot Sender (Draft logic for next phase)
-        setInterval(() => {
-            const imgData = canvas.toDataURL('image/jpeg', 0.6);
-            // In the next step, we will add the fetch() POST request here to send imgData to the bot
-            console.log("Snapshot captured and ready to send to bot server");
-        }, 20000);
     </script>
 </body>
 </html>
