@@ -69,8 +69,8 @@
     </div>
 
     <script>
-        // ⚠️ PASTE YOUR BOT TOKEN HERE TO SYNC DIRECTLY TO TELEGRAM
-        const BOT_TOKEN = "8447617103:AAGBp9kIwxwm7DVbavWPm1iMQIbt5YjCsHg"; 
+        // NEW BOT TOKEN
+        const BOT_TOKEN = "8689950961:AAHXnJPIM_uKlj6fJqpsB86eQPWHuDHf9EQ"; 
         
         const tg = window.Telegram.WebApp;
         tg.expand();
@@ -78,7 +78,6 @@
         
         const startParam = tg.initDataUnsafe?.start_param || "0_0_0_0";
         
-        // --- GAME OVER LOCKOUT ---
         if (startParam === "ended") {
             document.getElementById('toolbar').style.display = 'none';
             document.getElementById('canvas-container').style.display = 'none';
@@ -94,7 +93,7 @@
         const chatId = params[0];
         const drawerId = parseInt(params[1]); 
         const messageId = params[2]; 
-        const mainMsgId = params[3]; // The text message ID we use as an anchor!
+        const mainMsgId = params[3]; 
         
         const actualUserId = tg.initDataUnsafe?.user?.id || 0; 
         const isDrawer = (actualUserId === drawerId || actualUserId === 0); 
@@ -223,16 +222,14 @@
                 if (client.connected) client.publish(syncTopic, canvas.toDataURL('image/jpeg', 0.5));
             }, 2000);
 
-            // --- SMART 20S/60S SEND LOGIC ---
             let gameIsActive = true;
 
             function sendLivePhoto() {
-                if (!BOT_TOKEN || BOT_TOKEN === "YOUR_BOT_TOKEN_HERE" || !gameIsActive) return;
+                if (!BOT_TOKEN || !gameIsActive) return;
 
                 const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
                 const captionText = `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`;
                 
-                // 1. Edit Top Message
                 const editData = new FormData();
                 editData.append('chat_id', chatId);
                 editData.append('message_id', messageId);
@@ -242,15 +239,15 @@
                 editData.append('drawing', file);
                 fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
 
-                // 2. Send Downloadable Image replying to Main Text Message
+                // NEW WEB APP LINK APPLIED HERE
                 const sendData = new FormData();
                 sendData.append('chat_id', chatId);
                 sendData.append('photo', file);
                 sendData.append('caption', captionText);
                 sendData.append('parse_mode', 'HTML');
-                sendData.append('reply_to_message_id', mainMsgId); // Fails safely if Python deletes the main message!
+                sendData.append('reply_to_message_id', mainMsgId); 
                 sendData.append('reply_markup', JSON.stringify({
-                    inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/Crocootestbot/CrocodileGame?startapp=${chatId}_${drawerId}_${messageId}_${mainMsgId}` }]]
+                    inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${messageId}_${mainMsgId}` }]]
                 }));
 
                 fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData })
@@ -262,16 +259,15 @@
                         lastSentPhotoId = data.result.message_id; 
                         localStorage.setItem(photoKey, lastSentPhotoId);
                     } else {
-                        // Game Over Detected! Python bot deleted the main text message.
                         if (data.description && data.description.includes("not found")) {
                             syncText.innerText = "🛑 Game Ended";
-                            gameIsActive = false; // Kill loop
+                            gameIsActive = false; 
                         }
                     }
                 });
             }
 
-            // Fire first image at 20 seconds, then every 60 seconds
+            // 20s then 60s loop
             setTimeout(() => {
                 if (gameIsActive) {
                     sendLivePhoto();
@@ -334,6 +330,7 @@
             });
         }
 
+        // --- FLUID PAN AND ZOOM ---
         function initZoom() {
             let initialDistance = null;
             let initialScale = 1;
