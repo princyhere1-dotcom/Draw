@@ -15,7 +15,6 @@
         #toolbar { background: white; padding: 10px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; box-shadow: 0 -4px 10px rgba(0,0,0,0.15); z-index: 10; border-top: 1px solid #ccc; width: 100%; box-sizing: border-box; flex-shrink: 0; }
         button, select, input { padding: 8px; border-radius: 5px; border: 1px solid #ccc; font-weight: bold; font-size: 14px; }
         
-        /* New Palette Styles */
         #palette { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; padding: 2px; border-right: 2px solid #ddd; padding-right: 10px; }
         .color-swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #999; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         .color-swatch:active { transform: scale(0.9); }
@@ -80,16 +79,15 @@
         
         const actualUserId = tg.initDataUnsafe?.user?.id || 0; 
         const isDrawer = (actualUserId === drawerId || actualUserId === 0); 
+        const drawerName = tg.initDataUnsafe?.user?.first_name || 'Player';
 
         const canvas = document.getElementById('board');
         const ctx = canvas.getContext('2d');
         const container = document.getElementById('canvas-container');
         const syncText = document.getElementById('syncText');
         
-        // --- NEW: Smart Color & Eraser Logic ---
         function setColor(hex) {
             document.getElementById('colorPicker').value = hex;
-            // If they pick a color while using the Eraser, switch back to the Solid Brush automatically!
             if (document.getElementById('toolSelect').value === 'eraser') {
                 document.getElementById('toolSelect').value = 'solid';
             }
@@ -99,13 +97,11 @@
             document.getElementById('toolSelect').value = 'eraser';
         };
 
-        // Also switch back to solid brush if they use the custom color picker
         document.getElementById('colorPicker').addEventListener('input', () => {
             if (document.getElementById('toolSelect').value === 'eraser') {
                 document.getElementById('toolSelect').value = 'solid';
             }
         });
-        // ---------------------------------------
 
         canvas.width = window.innerWidth;
         
@@ -199,26 +195,34 @@
                 }
             }, 2000);
 
+            // CHANGED TO 60 SECONDS (1 MINUTE INTERVAL)
             setInterval(() => {
-                if (BOT_TOKEN === "YOUR_BOT_TOKEN_HERE") return;
+                if (!BOT_TOKEN) return;
 
                 const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
+                const captionText = `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`;
                 
                 const editData = new FormData();
                 editData.append('chat_id', chatId);
                 editData.append('message_id', messageId);
-                editData.append('media', JSON.stringify({type: 'photo', media: 'attach://drawing'}));
+                editData.append('media', JSON.stringify({
+                    type: 'photo', 
+                    media: 'attach://drawing',
+                    caption: captionText,
+                    parse_mode: 'HTML'
+                }));
                 editData.append('drawing', file);
                 fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
 
                 const sendData = new FormData();
                 sendData.append('chat_id', chatId);
                 sendData.append('photo', file);
-                sendData.append('caption', "Live Drawing... 🖌️");
+                sendData.append('caption', captionText);
+                sendData.append('parse_mode', 'HTML');
                 
                 const replyMarkup = {
                     inline_keyboard: [
-                        [{text: "Open Canvas 🎨", url: `https://t.me/Crocootestbot/CrocodileGame?startapp=${chatId}_${drawerId}_${messageId}`}]
+                        [{text: "🎨 Open Canvas", url: `https://t.me/Crocootestbot/CrocodileGame?startapp=${chatId}_${drawerId}_${messageId}`}]
                     ]
                 };
                 sendData.append('reply_markup', JSON.stringify(replyMarkup));
@@ -226,10 +230,10 @@
                 fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData })
                 .then(r => r.json())
                 .then(data => {
-                    if(data.ok) syncText.innerText = "🟢 Sent Photo (20s)";
+                    if(data.ok) syncText.innerText = "🟢 Sent Photo (60s)";
                 });
 
-            }, 20000);
+            }, 60000); 
         }
 
         let drawing = false;
@@ -237,7 +241,11 @@
         let tempCanvas = document.createElement('canvas');
         tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
         let tempCtx = tempCanvas.getContext('2d');
+        
+        // Panning variables
         let scale = 1;
+        let panX = 0;
+        let panY = 0;
 
         function initDrawing() {
             container.addEventListener('pointerdown', (e) => {
@@ -294,30 +302,49 @@
         function initZoom() {
             let initialDistance = null;
             let initialScale = 1;
+            let startPanX = 0;
+            let startPanY = 0;
+            let startMidX = 0;
+            let startMidY = 0;
+
             container.addEventListener('touchstart', e => {
                 if (e.touches.length === 2) {
                     drawing = false;
                     let t1 = e.touches[0], t2 = e.touches[1];
                     initialDistance = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
                     initialScale = scale;
-                    
-                    if (scale === 1) { 
-                        const rect = container.getBoundingClientRect();
-                        const midX = ((t1.clientX + t2.clientX) / 2) - rect.left;
-                        const midY = ((t1.clientY + t2.clientY) / 2) - rect.top;
-                        canvas.style.transformOrigin = `${midX}px ${midY}px`;
-                    }
+                    startPanX = panX;
+                    startPanY = panY;
+                    startMidX = (t1.clientX + t2.clientX) / 2;
+                    startMidY = (t1.clientY + t2.clientY) / 2;
                 }
             });
+            
             container.addEventListener('touchmove', e => {
                 if (e.touches.length === 2 && initialDistance) {
                     e.preventDefault();
                     let t1 = e.touches[0], t2 = e.touches[1];
+                    
+                    // Zoom Calculation
                     let currentDistance = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
                     scale = Math.min(Math.max(1, initialScale * (currentDistance / initialDistance)), 4); 
-                    canvas.style.transform = `scale(${scale})`;
+                    
+                    // Pan Calculation
+                    let currentMidX = (t1.clientX + t2.clientX) / 2;
+                    let currentMidY = (t1.clientY + t2.clientY) / 2;
+                    
+                    if (scale > 1) {
+                        panX = startPanX + (currentMidX - startMidX);
+                        panY = startPanY + (currentMidY - startMidY);
+                    } else {
+                        panX = 0;
+                        panY = 0;
+                    }
+                    
+                    canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
                 }
             });
+            
             container.addEventListener('touchend', () => { initialDistance = null; });
         }
     </script>
