@@ -69,7 +69,7 @@
     </div>
 
     <script>
-        // ⚠️ PASTE YOUR BOT TOKEN HERE TO SYNC DIRECTLY TO TELEGRAM
+        // YOUR BOT TOKEN IS SAFELY ADDED HERE
         const BOT_TOKEN = "8447617103:AAGBp9kIwxwm7DVbavWPm1iMQIbt5YjCsHg"; 
         
         const tg = window.Telegram.WebApp;
@@ -130,31 +130,41 @@
 
         let history = [canvas.toDataURL()];
         let historyStep = 0;
-        let lastSentPhotoId = null; // Tracks photo for deletion!
+        
+        // --- BULLETPROOF LOCAL STORAGE RESTORATION ---
+        const storageKey = `canvas_${chatId}_${messageId}`;
+        const photoKey = `lastPhoto_${chatId}_${messageId}`;
+        let lastSentPhotoId = localStorage.getItem(photoKey) || null;
 
-        // --- RESTORE CANVAS STATE IF ACCIDENTALLY CLOSED ---
-        if (isDrawer && tg.CloudStorage) {
-            tg.CloudStorage.getItem(`canvas_${chatId}`, (err, val) => {
-                if (!err && val) {
-                    let img = new Image();
-                    img.src = val;
-                    img.onload = () => {
-                        ctx.drawImage(img, 0, 0);
-                        history = [canvas.toDataURL()];
-                        historyStep = 0;
-                    };
-                }
+        if (isDrawer) {
+            // Clean up old canvas data from previous games so memory doesn't fill up
+            Object.keys(localStorage).forEach(key => {
+                if (key.startsWith(`canvas_${chatId}_`) && key !== storageKey) localStorage.removeItem(key);
+                if (key.startsWith(`lastPhoto_${chatId}_`) && key !== photoKey) localStorage.removeItem(key);
             });
+
+            // Restore current canvas if closed accidentally
+            let saved = localStorage.getItem(storageKey);
+            if (saved) {
+                let img = new Image();
+                img.src = saved;
+                img.onload = () => {
+                    ctx.drawImage(img, 0, 0);
+                    history = [canvas.toDataURL()];
+                    historyStep = 0;
+                };
+            }
         }
 
         function saveState() {
             historyStep++;
             history = history.slice(0, historyStep);
-            history.push(canvas.toDataURL());
+            const currentData = canvas.toDataURL();
+            history.push(currentData);
             
-            // Backup stroke to cloud
-            if (isDrawer && tg.CloudStorage) {
-                tg.CloudStorage.setItem(`canvas_${chatId}`, canvas.toDataURL());
+            // Backup stroke to local browser storage (Fixes Telegram 4KB Cloud limit crash!)
+            if (isDrawer) {
+                localStorage.setItem(storageKey, currentData);
             }
         }
 
@@ -218,7 +228,7 @@
 
             // --- 60 SECOND INTERVAL WITH AUTO-DELETE OLD PHOTO ---
             setInterval(() => {
-                if (BOT_TOKEN === "YOUR_BOT_TOKEN_HERE") return;
+                if (!BOT_TOKEN) return;
 
                 const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
                 const captionText = `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`;
@@ -245,7 +255,7 @@
                 sendData.append('caption', captionText);
                 sendData.append('parse_mode', 'HTML');
                 sendData.append('reply_markup', JSON.stringify({
-                    inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/Crocootestbot/CrocodileGame?startapp=${chatId}_${drawerId}_${messageId}`, style: "success"}]]
+                    inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/Crocootestbot/CrocodileGame?startapp=${chatId}_${drawerId}_${messageId}` }]]
                 }));
 
                 fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData })
@@ -253,7 +263,8 @@
                 .then(data => {
                     if(data.ok) {
                         syncText.innerText = "🟢 Sent Photo (60s)";
-                        lastSentPhotoId = data.result.message_id; // Save new ID for next deletion
+                        lastSentPhotoId = data.result.message_id; 
+                        localStorage.setItem(photoKey, lastSentPhotoId); // Save for next reload just in case!
                     }
                 });
 
@@ -308,7 +319,7 @@
             });
 
             container.addEventListener('pointerup', () => { 
-                if(drawing) { drawing = false; history = history.slice(0, historyStep + 1); saveState(); ctx.shadowBlur = 0; } 
+                if(drawing) { drawing = false; saveState(); ctx.shadowBlur = 0; } 
             });
         }
 
