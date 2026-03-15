@@ -69,14 +69,14 @@
     </div>
 
     <script>
-        // YOUR BOT TOKEN IS SAFELY ADDED HERE
-        const BOT_TOKEN = "8447617103:AAGBp9kIwxwm7DVbavWPm1iMQIbt5YjCsHg"; 
+        // ⚠️ PASTE YOUR BOT TOKEN HERE TO SYNC DIRECTLY TO TELEGRAM
+        const BOT_TOKEN = "8689950961:AAHXnJPIM_uKlj6fJqpsB86eQPWHuDHf9EQ"; 
         
         const tg = window.Telegram.WebApp;
         tg.expand();
         if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
         
-        const startParam = tg.initDataUnsafe?.start_param || "0_0_0";
+        const startParam = tg.initDataUnsafe?.start_param || "0_0_0_0";
         
         // --- GAME OVER LOCKOUT ---
         if (startParam === "ended") {
@@ -94,6 +94,7 @@
         const chatId = params[0];
         const drawerId = parseInt(params[1]); 
         const messageId = params[2]; 
+        const mainMsgId = params[3]; // The text message ID we use as an anchor!
         
         const actualUserId = tg.initDataUnsafe?.user?.id || 0; 
         const isDrawer = (actualUserId === drawerId || actualUserId === 0); 
@@ -131,19 +132,16 @@
         let history = [canvas.toDataURL()];
         let historyStep = 0;
         
-        // --- BULLETPROOF LOCAL STORAGE RESTORATION ---
         const storageKey = `canvas_${chatId}_${messageId}`;
         const photoKey = `lastPhoto_${chatId}_${messageId}`;
         let lastSentPhotoId = localStorage.getItem(photoKey) || null;
 
         if (isDrawer) {
-            // Clean up old canvas data from previous games so memory doesn't fill up
             Object.keys(localStorage).forEach(key => {
                 if (key.startsWith(`canvas_${chatId}_`) && key !== storageKey) localStorage.removeItem(key);
                 if (key.startsWith(`lastPhoto_${chatId}_`) && key !== photoKey) localStorage.removeItem(key);
             });
 
-            // Restore current canvas if closed accidentally
             let saved = localStorage.getItem(storageKey);
             if (saved) {
                 let img = new Image();
@@ -162,7 +160,6 @@
             const currentData = canvas.toDataURL();
             history.push(currentData);
             
-            // Backup stroke to local browser storage (Fixes Telegram 4KB Cloud limit crash!)
             if (isDrawer) {
                 localStorage.setItem(storageKey, currentData);
             }
@@ -226,14 +223,16 @@
                 if (client.connected) client.publish(syncTopic, canvas.toDataURL('image/jpeg', 0.5));
             }, 2000);
 
-            // --- 60 SECOND INTERVAL WITH AUTO-DELETE OLD PHOTO ---
-            setInterval(() => {
-                if (!BOT_TOKEN) return;
+            // --- SMART 20S/60S SEND LOGIC ---
+            let gameIsActive = true;
+
+            function sendLivePhoto() {
+                if (!BOT_TOKEN || BOT_TOKEN === "YOUR_BOT_TOKEN_HERE" || !gameIsActive) return;
 
                 const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
                 const captionText = `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`;
                 
-                // 1. Edit Top Message (Preserves the Final Masterpiece)
+                // 1. Edit Top Message
                 const editData = new FormData();
                 editData.append('chat_id', chatId);
                 editData.append('message_id', messageId);
@@ -243,32 +242,44 @@
                 editData.append('drawing', file);
                 fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
 
-                // 2. Delete the previously sent live photo to prevent spam!
-                if (lastSentPhotoId) {
-                    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/deleteMessage?chat_id=${chatId}&message_id=${lastSentPhotoId}`);
-                }
-
-                // 3. Send the Brand New Downloadable Image
+                // 2. Send Downloadable Image replying to Main Text Message
                 const sendData = new FormData();
                 sendData.append('chat_id', chatId);
                 sendData.append('photo', file);
                 sendData.append('caption', captionText);
                 sendData.append('parse_mode', 'HTML');
+                sendData.append('reply_to_message_id', mainMsgId); // Fails safely if Python deletes the main message!
                 sendData.append('reply_markup', JSON.stringify({
-                    inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/Crocootestbot/CrocodileGame?startapp=${chatId}_${drawerId}_${messageId}` }]]
+                    inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/Crocootestbot/CrocodileGame?startapp=${chatId}_${drawerId}_${messageId}_${mainMsgId}` }]]
                 }));
 
                 fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData })
                 .then(r => r.json())
                 .then(data => {
                     if(data.ok) {
-                        syncText.innerText = "🟢 Sent Photo (60s)";
+                        syncText.innerText = "🟢 Sent Photo";
+                        if (lastSentPhotoId) fetch(`https://api.telegram.org/bot${BOT_TOKEN}/deleteMessage?chat_id=${chatId}&message_id=${lastSentPhotoId}`);
                         lastSentPhotoId = data.result.message_id; 
-                        localStorage.setItem(photoKey, lastSentPhotoId); // Save for next reload just in case!
+                        localStorage.setItem(photoKey, lastSentPhotoId);
+                    } else {
+                        // Game Over Detected! Python bot deleted the main text message.
+                        if (data.description && data.description.includes("not found")) {
+                            syncText.innerText = "🛑 Game Ended";
+                            gameIsActive = false; // Kill loop
+                        }
                     }
                 });
+            }
 
-            }, 60000); // 60 SECONDS
+            // Fire first image at 20 seconds, then every 60 seconds
+            setTimeout(() => {
+                if (gameIsActive) {
+                    sendLivePhoto();
+                    setInterval(() => {
+                        if (gameIsActive) sendLivePhoto();
+                    }, 60000);
+                }
+            }, 20000);
         }
 
         // --- DRAWING LOGIC ---
@@ -319,11 +330,10 @@
             });
 
             container.addEventListener('pointerup', () => { 
-                if(drawing) { drawing = false; saveState(); ctx.shadowBlur = 0; } 
+                if(drawing) { drawing = false; history = history.slice(0, historyStep + 1); saveState(); ctx.shadowBlur = 0; } 
             });
         }
 
-        // --- FLUID PAN AND ZOOM ---
         function initZoom() {
             let initialDistance = null;
             let initialScale = 1;
