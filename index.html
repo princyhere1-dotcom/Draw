@@ -82,7 +82,7 @@
     </div>
 
     <script>
-        // NEW BOT TOKEN
+        // YOUR BOT TOKEN IS SAFELY ADDED HERE
         const BOT_TOKEN = "8689950961:AAHXnJPIM_uKlj6fJqpsB86eQPWHuDHf9EQ"; 
         
         const tg = window.Telegram.WebApp;
@@ -201,14 +201,13 @@
             return new File([u8arr], filename, {type:mime});
         }
 
-        // --- REAL-TIME CONNECTION TO PYTHON BOT (Ntfy) ---
         const evtSource = new EventSource(`https://ntfy.sh/WispDraw_${chatId}_${startTime}/sse`);
         let comments = [];
 
         evtSource.onmessage = function(e) {
             const data = e.data;
             
-            // Handle Chat Comments
+            // 5 Max Live Comments
             if (data.startsWith("MSG|")) {
                 const parts = data.split("|");
                 comments.push(`<b>${parts[1]}:</b> ${parts[2]}`);
@@ -216,10 +215,10 @@
                 document.getElementById("comments-container").innerHTML = comments.map(c => `<div class="comment">${c}</div>`).join("");
             }
             
-            // Handle Game Won Lockout
+            // Lockout Drawer Instantly on Win
             if (data.startsWith("WIN|")) {
                 const parts = data.split("|");
-                gameIsActive = false; // Immediately disable drawing and loops
+                gameIsActive = false; 
                 
                 document.getElementById('toolbar').style.display = 'none';
                 const overlay = document.getElementById('viewer-overlay');
@@ -227,7 +226,6 @@
                 overlay.style.background = '#2ecc71';
                 overlay.innerHTML = `<h1 style="margin:0; font-size:50px;">🎉</h1><p>${parts[1]} guessed the word!</p><p>Word: <b>${parts[2]}</b></p>`;
                 
-                // WebApp sends the highly-requested Final Masterpiece!
                 if (isDrawer && BOT_TOKEN) {
                     const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.9), 'final.jpg');
                     const sendData = new FormData();
@@ -239,7 +237,7 @@
                 }
             }
             
-            // Handle /hint Command
+            // Send Canvas to chat on Hint
             if (data.startsWith("HINT|")) {
                 if (isDrawer && BOT_TOKEN && gameIsActive) {
                     const parts = data.split("|");
@@ -255,7 +253,6 @@
                 }
             }
             
-            // Handle Cancel/Timeout
             if (data.startsWith("END|")) {
                 gameIsActive = false;
                 document.getElementById('toolbar').style.display = 'none';
@@ -266,7 +263,6 @@
             }
         };
 
-        // --- VIEWER SYNC (MQTT) ---
         const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
         const syncTopic = `WispDrawBot/chat/${chatId}_${startTime}`;
 
@@ -294,11 +290,16 @@
                 if (client.connected && gameIsActive) client.publish(syncTopic, canvas.toDataURL('image/jpeg', 0.5));
             }, 2000);
 
-            function sendLivePhoto() {
+            function sendLivePhoto(captionType) {
                 if (!BOT_TOKEN || !gameIsActive) return;
 
                 const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
-                const captionText = `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`;
+                let captionText = "";
+                if (captionType === 'initial') {
+                    captionText = "<b>Live Drawing...</b> 🖌️";
+                } else {
+                    captionText = `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`;
+                }
                 
                 const sendData = new FormData();
                 sendData.append('chat_id', chatId);
@@ -319,22 +320,52 @@
                         lastSentPhotoId = data.result.message_id; 
                         localStorage.setItem(photoKey, lastSentPhotoId);
                     } else {
+                        // Game Over Detected
                         if (data.description && data.description.includes("not found")) gameIsActive = false; 
                     }
                 });
             }
 
-            // Exactly as requested: 0s -> 20s -> 60s loop
-            if (!lastSentPhotoId) sendLivePhoto(); // Send initial photo when Canvas Opens!
+            const initialSentKey = `initSent_${chatId}_${startTime}`;
             
-            setTimeout(() => {
-                if (gameIsActive) {
-                    sendLivePhoto(); // Send the 20s photo
-                    setInterval(() => {
-                        if (gameIsActive) sendLivePhoto(); // Loop the 60s photo
-                    }, 60000);
+            // Timing Logic: 0s -> 15s -> 60s
+            if (!localStorage.getItem(initialSentKey)) {
+                sendLivePhoto('initial');
+                localStorage.setItem(initialSentKey, "true");
+                
+                setTimeout(() => {
+                    if (gameIsActive) {
+                        sendLivePhoto('update');
+                        setInterval(() => {
+                            if (gameIsActive) sendLivePhoto('update');
+                        }, 60000);
+                    }
+                }, 15000);
+            } else {
+                setInterval(() => {
+                    if (gameIsActive) sendLivePhoto('update');
+                }, 60000);
+            }
+
+            // Secret 5-second live updater in case they close the app!
+            setInterval(() => {
+                if (BOT_TOKEN && gameIsActive && lastSentPhotoId) {
+                    const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
+                    const editData = new FormData();
+                    editData.append('chat_id', chatId);
+                    editData.append('message_id', lastSentPhotoId);
+                    editData.append('media', JSON.stringify({
+                        type: 'photo', media: 'attach://drawing', 
+                        caption: `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`, 
+                        parse_mode: 'HTML'
+                    }));
+                    editData.append('drawing', file);
+                    editData.append('reply_markup', JSON.stringify({ 
+                        inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${startTime}_${mainMsgId}` }]] 
+                    }));
+                    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
                 }
-            }, 20000);
+            }, 5000);
         }
 
         // --- DRAWING LOGIC ---
