@@ -12,7 +12,8 @@
         
         #viewer-overlay { display: none; background: #ff4757; color: white; padding: 20px; text-align: center; font-weight: bold; font-size: 18px; z-index: 20; width: 100%; height: 100vh; box-sizing: border-box; align-items: center; justify-content: center; flex-direction: column; }
         
-        #win-overlay { display: none; background: rgba(46, 204, 113, 0.95); color: white; position: absolute; top:0; left:0; width:100%; height:100%; z-index: 30; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px; box-sizing: border-box; backdrop-filter: blur(8px); }
+        /* Upgraded Win Overlay - Fixed position to ensure it covers everything */
+        #win-overlay { display: none; background: rgba(46, 204, 113, 0.95); color: white; position: fixed; top:0; left:0; width:100%; height:100%; z-index: 9999; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px; box-sizing: border-box; backdrop-filter: blur(8px); }
         .win-btn { padding: 14px 28px; font-size: 16px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: transform 0.2s; }
         .win-btn:active { transform: scale(0.95); }
         
@@ -30,7 +31,7 @@
             width: 92%; box-sizing: border-box; 
         }
         
-        button, select, input[type="range"] { 
+        button, select { 
             padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.1); 
             font-weight: 600; font-size: 14px; background: #fff; color: #333;
             box-shadow: 0 2px 6px rgba(0,0,0,0.05); outline: none; transition: 0.2s;
@@ -50,8 +51,14 @@
             opacity: 0; width: 100%; height: 100%; position: absolute; top:0; left:0; cursor: pointer;
         }
 
-        /* Brush Slider Size Adjusted */
-        #brushSize { width: 140px; height: 16px; accent-color: #333; cursor: pointer; }
+        /* Brush Slider Size Upgraded for easier touching */
+        #brushSize { 
+            width: 180px; 
+            height: 20px; 
+            accent-color: #333; 
+            cursor: pointer; 
+        }
+        
         #clearBtn { background: #ff4757; color: white; border: none; }
         
         #comments-wrapper {
@@ -566,9 +573,9 @@
                 
                 const rect = canvas.getBoundingClientRect();
                 
-                // Fixing stroke placement during zoom (removed / scale)
-                startX = (e.clientX - rect.left) * (canvas.width / rect.width);
-                startY = (e.clientY - rect.top) * (canvas.height / rect.height);
+                // Fixed explicit coordinate scaling to prevent drawing offset bugs when zoomed
+                startX = ((e.clientX - rect.left) / scale) * dpr;
+                startY = ((e.clientY - rect.top) / scale) * dpr;
                 
                 let tool = document.getElementById('toolSelect').value;
                 if (tool === 'fill') {
@@ -586,9 +593,9 @@
                 if (!drawing || (!gameIsActive && !keepDrawing)) return;
                 const rect = canvas.getBoundingClientRect();
                 
-                // Fixing stroke placement during zoom (removed / scale)
-                const currentX = (e.clientX - rect.left) * (canvas.width / rect.width);
-                const currentY = (e.clientY - rect.top) * (canvas.height / rect.height);
+                // Fixed explicit coordinate scaling for live drawing tracking
+                const currentX = ((e.clientX - rect.left) / scale) * dpr;
+                const currentY = ((e.clientY - rect.top) / scale) * dpr;
                 
                 let tool = document.getElementById('toolSelect').value;
                 let color = tool === 'eraser' ? 'white' : document.getElementById('colorPicker').value;
