@@ -82,7 +82,6 @@
     </div>
 
     <script>
-        // YOUR BOT TOKEN IS SAFELY ADDED HERE
         const BOT_TOKEN = "8689950961:AAHXnJPIM_uKlj6fJqpsB86eQPWHuDHf9EQ"; 
         
         const tg = window.Telegram.WebApp;
@@ -320,7 +319,6 @@
                         lastSentPhotoId = data.result.message_id; 
                         localStorage.setItem(photoKey, lastSentPhotoId);
                     } else {
-                        // Game Over Detected
                         if (data.description && data.description.includes("not found")) gameIsActive = false; 
                     }
                 });
@@ -328,7 +326,7 @@
 
             const initialSentKey = `initSent_${chatId}_${startTime}`;
             
-            // Timing Logic: 0s -> 15s -> 60s
+            // 1. Sends a brand new photo at 0s, 15s, and 60s intervals (deleting old message to keep chat fresh)
             if (!localStorage.getItem(initialSentKey)) {
                 sendLivePhoto('initial');
                 localStorage.setItem(initialSentKey, "true");
@@ -347,7 +345,7 @@
                 }, 60000);
             }
 
-            // Secret 5-second live updater in case they close the app!
+            // 2. Edits the active photo in-place every 5 seconds so live viewing remains updated
             setInterval(() => {
                 if (BOT_TOKEN && gameIsActive && lastSentPhotoId) {
                     const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
@@ -360,8 +358,8 @@
                         parse_mode: 'HTML'
                     }));
                     editData.append('drawing', file);
-                    editData.append('reply_markup', JSON.stringify({ 
-                        inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${startTime}_${mainMsgId}` }]] 
+                    editData.append('reply_markup', JSON.stringify({
+                        inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${startTime}_${mainMsgId}` }]]
                     }));
                     fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
                 }
