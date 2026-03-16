@@ -11,6 +11,10 @@
         
         #viewer-overlay { display: none; background: #ff4d4d; color: white; padding: 20px; text-align: center; font-weight: bold; font-size: 18px; z-index: 20; width: 100%; height: 100vh; box-sizing: border-box; align-items: center; justify-content: center; flex-direction: column; }
         
+        /* NEW WIN OVERLAY */
+        #win-overlay { display: none; background: rgba(46, 204, 113, 0.95); color: white; position: absolute; top:0; left:0; width:100%; height:100%; z-index: 30; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px; box-sizing: border-box; backdrop-filter: blur(5px); }
+        .win-btn { padding: 12px 24px; font-size: 16px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.2); }
+        
         #canvas-container { flex: 1; overflow: hidden; position: relative; background: white; touch-action: none; width: 100%; }
         canvas { position: absolute; top: 0; left: 0; transform-origin: center center; }
         
@@ -43,6 +47,16 @@
     <div id="viewer-overlay">
         <p>👁️ VIEWER MODE</p>
         <p>Watching live drawing...</p>
+    </div>
+    
+    <div id="win-overlay">
+        <h1 style="margin:0; font-size:50px;">🎉</h1>
+        <p id="win-text" style="font-size: 22px; margin: 15px 0; line-height: 1.4;"></p>
+        <p style="font-size: 16px; margin-bottom: 25px; font-weight: bold;">Would you like to keep drawing?</p>
+        <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+            <button id="keepDrawingBtn" class="win-btn" style="background: white; color: #2ecc71;">Keep drawing</button>
+            <button id="closeCanvasBtn" class="win-btn" style="background: #e74c3c; color: white;">Close Canvas</button>
+        </div>
     </div>
     
     <div id="canvas-container">
@@ -117,6 +131,7 @@
         const syncText = document.getElementById('syncText');
         
         let gameIsActive = true;
+        let keepDrawing = false; 
         
         function setColor(hex) {
             document.getElementById('colorPicker').value = hex;
@@ -170,11 +185,11 @@
             history = history.slice(0, historyStep);
             const currentData = canvas.toDataURL();
             history.push(currentData);
-            if (isDrawer && gameIsActive) localStorage.setItem(storageKey, currentData);
+            if (isDrawer && (gameIsActive || keepDrawing)) localStorage.setItem(storageKey, currentData);
         }
 
         document.getElementById('undoBtn').onclick = () => {
-            if(historyStep > 0 && gameIsActive) {
+            if(historyStep > 0 && (gameIsActive || keepDrawing)) {
                 historyStep--;
                 let img = new Image(); img.src = history[historyStep];
                 img.onload = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0); }
@@ -182,7 +197,7 @@
         };
 
         document.getElementById('redoBtn').onclick = () => {
-            if(historyStep < history.length - 1 && gameIsActive) {
+            if(historyStep < history.length - 1 && (gameIsActive || keepDrawing)) {
                 historyStep++;
                 let img = new Image(); img.src = history[historyStep];
                 img.onload = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0); }
@@ -190,7 +205,7 @@
         };
         
         document.getElementById('clearBtn').onclick = () => { 
-            if(gameIsActive){ ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height); saveState(); }
+            if(gameIsActive || keepDrawing){ ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height); saveState(); }
         };
 
         function dataURLtoFile(dataurl, filename) {
@@ -199,6 +214,32 @@
             while(n--) u8arr[n] = bstr.charCodeAt(n);
             return new File([u8arr], filename, {type:mime});
         }
+        
+        // --- BUTTON HANDLERS FOR THE WIN OVERLAY ---
+        document.getElementById('keepDrawingBtn').onclick = () => {
+            document.getElementById('win-overlay').style.display = 'none';
+            keepDrawing = true; 
+        };
+
+        document.getElementById('closeCanvasBtn').onclick = () => {
+            if (BOT_TOKEN && lastSentPhotoId && keepDrawing) {
+                const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
+                const editData = new FormData();
+                editData.append('chat_id', chatId);
+                editData.append('message_id', lastSentPhotoId);
+                editData.append('media', JSON.stringify({
+                    type: 'photo', media: 'attach://drawing', 
+                    caption: `🎨 <b>Final Masterpiece!</b>\nWord was: <b>${window.finalWord}</b>`, 
+                    parse_mode: 'HTML'
+                }));
+                editData.append('drawing', file);
+                fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData})
+                .then(() => tg.close())
+                .catch(() => tg.close());
+            } else {
+                tg.close();
+            }
+        };
 
         const evtSource = new EventSource(`https://ntfy.sh/WispDraw_${chatId}_${startTime}/sse`);
         let comments = [];
@@ -214,31 +255,42 @@
                 document.getElementById("comments-container").innerHTML = comments.map(c => `<div class="comment">${c}</div>`).join("");
             }
             
-            // Lockout Drawer Instantly on Win
+            // Win Flow
             if (data.startsWith("WIN|")) {
                 const parts = data.split("|");
                 gameIsActive = false; 
+                window.finalWord = parts[2];
                 
-                document.getElementById('toolbar').style.display = 'none';
-                const overlay = document.getElementById('viewer-overlay');
-                overlay.style.display = 'flex';
-                overlay.style.background = '#2ecc71';
-                overlay.innerHTML = `<h1 style="margin:0; font-size:50px;">🎉</h1><p>${parts[1]} guessed the word!</p><p>Word: <b>${parts[2]}</b></p>`;
-                
-                if (isDrawer && BOT_TOKEN) {
-                    const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.9), 'final.jpg');
-                    const sendData = new FormData();
-                    sendData.append('chat_id', chatId);
-                    sendData.append('photo', file);
-                    sendData.append('caption', `🎨 <b>Final Masterpiece!</b>\nWord was: <b>${parts[2]}</b>`);
-                    sendData.append('parse_mode', 'HTML');
-                    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData });
+                if (isDrawer) {
+                    document.getElementById('win-overlay').style.display = 'flex';
+                    document.getElementById('win-text').innerHTML = `<b>${parts[1]}</b> found the word!<br><br>Word: <b>${parts[2]}</b>`;
+                    
+                    // Immediately transition the chat photo into the "Final Masterpiece"
+                    if (BOT_TOKEN && lastSentPhotoId) {
+                        const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.9), 'final.jpg');
+                        const editData = new FormData();
+                        editData.append('chat_id', chatId);
+                        editData.append('message_id', lastSentPhotoId);
+                        editData.append('media', JSON.stringify({
+                            type: 'photo', media: 'attach://drawing', 
+                            caption: `🎨 <b>Final Masterpiece!</b>\nWord was: <b>${parts[2]}</b>`, 
+                            parse_mode: 'HTML'
+                        }));
+                        editData.append('drawing', file);
+                        fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
+                    }
+                } else {
+                    document.getElementById('toolbar').style.display = 'none';
+                    const overlay = document.getElementById('viewer-overlay');
+                    overlay.style.display = 'flex';
+                    overlay.style.background = '#2ecc71';
+                    overlay.innerHTML = `<h1 style="margin:0; font-size:50px;">🎉</h1><p>${parts[1]} guessed the word!</p><p>Word: <b>${parts[2]}</b></p>`;
                 }
             }
             
             // Send Canvas to chat on Hint
             if (data.startsWith("HINT|")) {
-                if (isDrawer && BOT_TOKEN && gameIsActive) {
+                if (isDrawer && BOT_TOKEN && (gameIsActive || keepDrawing)) {
                     const parts = data.split("|");
                     const hintMsgId = parts[1];
                     const turnName = parts[2];
@@ -254,6 +306,7 @@
             
             if (data.startsWith("END|")) {
                 gameIsActive = false;
+                keepDrawing = false;
                 document.getElementById('toolbar').style.display = 'none';
                 const overlay = document.getElementById('viewer-overlay');
                 overlay.style.display = 'flex';
@@ -286,7 +339,7 @@
             initZoom();
             
             setInterval(() => {
-                if (client.connected && gameIsActive) client.publish(syncTopic, canvas.toDataURL('image/jpeg', 0.5));
+                if (client.connected && (gameIsActive || keepDrawing)) client.publish(syncTopic, canvas.toDataURL('image/jpeg', 0.5));
             }, 2000);
 
             function sendLivePhoto(captionType) {
@@ -345,23 +398,38 @@
                 }, 60000);
             }
 
-            // 2. Edits the active photo in-place every 5 seconds so live viewing remains updated
+            // 2. Edits the active photo in-place every 5 seconds so live viewing remains updated (Handles Both Modes!)
             setInterval(() => {
-                if (BOT_TOKEN && gameIsActive && lastSentPhotoId) {
-                    const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
-                    const editData = new FormData();
-                    editData.append('chat_id', chatId);
-                    editData.append('message_id', lastSentPhotoId);
-                    editData.append('media', JSON.stringify({
-                        type: 'photo', media: 'attach://drawing', 
-                        caption: `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`, 
-                        parse_mode: 'HTML'
-                    }));
-                    editData.append('drawing', file);
-                    editData.append('reply_markup', JSON.stringify({
-                        inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${startTime}_${mainMsgId}` }]]
-                    }));
-                    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
+                if (BOT_TOKEN && lastSentPhotoId) {
+                    if (gameIsActive) {
+                        const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
+                        const editData = new FormData();
+                        editData.append('chat_id', chatId);
+                        editData.append('message_id', lastSentPhotoId);
+                        editData.append('media', JSON.stringify({
+                            type: 'photo', media: 'attach://drawing', 
+                            caption: `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`, 
+                            parse_mode: 'HTML'
+                        }));
+                        editData.append('drawing', file);
+                        editData.append('reply_markup', JSON.stringify({
+                            inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${startTime}_${mainMsgId}` }]]
+                        }));
+                        fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
+                    } else if (keepDrawing) {
+                        // Edits the Final Masterpiece photo as they continue adding detail! (No Inline Keyboard)
+                        const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
+                        const editData = new FormData();
+                        editData.append('chat_id', chatId);
+                        editData.append('message_id', lastSentPhotoId);
+                        editData.append('media', JSON.stringify({
+                            type: 'photo', media: 'attach://drawing', 
+                            caption: `🎨 <b>Final Masterpiece!</b>\nWord was: <b>${window.finalWord}</b>`, 
+                            parse_mode: 'HTML'
+                        }));
+                        editData.append('drawing', file);
+                        fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
+                    }
                 }
             }, 5000);
         }
@@ -379,7 +447,7 @@
 
         function initDrawing() {
             container.addEventListener('pointerdown', (e) => {
-                if (e.touches && e.touches.length > 1 || !gameIsActive) return;
+                if (e.touches && e.touches.length > 1 || (!gameIsActive && !keepDrawing)) return;
                 drawing = true;
                 const rect = canvas.getBoundingClientRect();
                 startX = (e.clientX - rect.left) / scale;
@@ -388,7 +456,7 @@
             });
 
             container.addEventListener('pointermove', (e) => {
-                if (!drawing || !gameIsActive) return;
+                if (!drawing || (!gameIsActive && !keepDrawing)) return;
                 const rect = canvas.getBoundingClientRect();
                 const currentX = (e.clientX - rect.left) / scale;
                 const currentY = (e.clientY - rect.top) / scale;
@@ -414,7 +482,7 @@
             });
 
             container.addEventListener('pointerup', () => { 
-                if(drawing && gameIsActive) { drawing = false; history = history.slice(0, historyStep + 1); saveState(); ctx.shadowBlur = 0; } 
+                if(drawing && (gameIsActive || keepDrawing)) { drawing = false; history = history.slice(0, historyStep + 1); saveState(); ctx.shadowBlur = 0; } 
             });
         }
 
