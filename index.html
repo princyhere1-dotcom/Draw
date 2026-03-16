@@ -272,7 +272,8 @@
             }
         };
 
-        const evtSource = new EventSource(`https://ntfy.sh/WispDraw_${chatId}_${startTime}/sse`);
+        // ---> FIX IS HERE: Bypassing the blocked ntfy.sh server <---
+        const evtSource = new EventSource(`https://ntfy.envs.net/WispDraw_${chatId}_${startTime}/sse`);
         let comments = [];
 
         evtSource.onmessage = function(e) {
