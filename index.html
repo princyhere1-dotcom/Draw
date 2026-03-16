@@ -393,7 +393,12 @@
                 sendData.append('photo', file);
                 sendData.append('caption', captionText);
                 sendData.append('parse_mode', 'HTML');
-                sendData.append('reply_to_message_id', mainMsgId); 
+                
+                // FIXED: Only append reply_to_message_id on the initial message to prevent 60s bumps from failing
+                if (captionType === 'initial') {
+                    sendData.append('reply_to_message_id', mainMsgId); 
+                }
+                
                 sendData.append('reply_markup', JSON.stringify({
                     inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/Crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${startTime}_${mainMsgId}` }]]
                 }));
@@ -407,7 +412,9 @@
                         lastSentPhotoId = data.result.message_id; 
                         localStorage.setItem(photoKey, lastSentPhotoId);
                     } else {
-                        if (data.description && data.description.includes("not found")) gameIsActive = false; 
+                        if (data.description && data.description.includes("not found")) {
+                            // Suppressed forced disconnect on missing message
+                        } 
                     }
                 });
             }
