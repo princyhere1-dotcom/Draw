@@ -23,6 +23,18 @@
         
         input[type="color"] { width: 34px; height: 34px; padding: 0; cursor: pointer; border: none; border-radius: 50%; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         input[type="range"] { width: 90px; }
+
+        /* LIVE COMMENTS UI */
+        #comments-container {
+            position: absolute; top: 10px; right: 10px; width: 220px; z-index: 15;
+            display: flex; flex-direction: column; gap: 5px; pointer-events: none;
+        }
+        .comment {
+            background: rgba(0,0,0,0.7); color: white; padding: 6px 10px; border-radius: 8px;
+            font-size: 13px; word-wrap: break-word; animation: fadeIn 0.3s;
+        }
+        .comment b { color: #ffcc00; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
     </style>
 </head>
 <body>
@@ -35,6 +47,7 @@
     
     <div id="canvas-container">
         <canvas id="board"></canvas>
+        <div id="comments-container"></div> 
     </div>
     
     <div id="toolbar">
@@ -69,7 +82,7 @@
     </div>
 
     <script>
-        // NEW BOT TOKEN
+        // YOUR BOT TOKEN IS SAFELY ADDED HERE
         const BOT_TOKEN = "8689950961:AAHXnJPIM_uKlj6fJqpsB86eQPWHuDHf9EQ"; 
         
         const tg = window.Telegram.WebApp;
@@ -92,7 +105,7 @@
         const params = startParam.split("_");
         const chatId = params[0];
         const drawerId = parseInt(params[1]); 
-        const messageId = params[2]; 
+        const startTime = params[2]; 
         const mainMsgId = params[3]; 
         
         const actualUserId = tg.initDataUnsafe?.user?.id || 0; 
@@ -104,11 +117,11 @@
         const container = document.getElementById('canvas-container');
         const syncText = document.getElementById('syncText');
         
+        let gameIsActive = true;
+        
         function setColor(hex) {
             document.getElementById('colorPicker').value = hex;
-            if (document.getElementById('toolSelect').value === 'eraser') {
-                document.getElementById('toolSelect').value = 'solid';
-            }
+            if (document.getElementById('toolSelect').value === 'eraser') document.getElementById('toolSelect').value = 'solid';
         }
 
         document.getElementById('eraserBtn').onclick = () => { document.getElementById('toolSelect').value = 'eraser'; };
@@ -131,8 +144,8 @@
         let history = [canvas.toDataURL()];
         let historyStep = 0;
         
-        const storageKey = `canvas_${chatId}_${messageId}`;
-        const photoKey = `lastPhoto_${chatId}_${messageId}`;
+        const storageKey = `canvas_${chatId}_${startTime}`;
+        const photoKey = `lastPhoto_${chatId}_${startTime}`;
         let lastSentPhotoId = localStorage.getItem(photoKey) || null;
 
         if (isDrawer) {
@@ -158,14 +171,11 @@
             history = history.slice(0, historyStep);
             const currentData = canvas.toDataURL();
             history.push(currentData);
-            
-            if (isDrawer) {
-                localStorage.setItem(storageKey, currentData);
-            }
+            if (isDrawer && gameIsActive) localStorage.setItem(storageKey, currentData);
         }
 
         document.getElementById('undoBtn').onclick = () => {
-            if(historyStep > 0) {
+            if(historyStep > 0 && gameIsActive) {
                 historyStep--;
                 let img = new Image(); img.src = history[historyStep];
                 img.onload = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0); }
@@ -173,7 +183,7 @@
         };
 
         document.getElementById('redoBtn').onclick = () => {
-            if(historyStep < history.length - 1) {
+            if(historyStep < history.length - 1 && gameIsActive) {
                 historyStep++;
                 let img = new Image(); img.src = history[historyStep];
                 img.onload = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0); }
@@ -181,7 +191,7 @@
         };
         
         document.getElementById('clearBtn').onclick = () => { 
-            ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height); saveState(); 
+            if(gameIsActive){ ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height); saveState(); }
         };
 
         function dataURLtoFile(dataurl, filename) {
@@ -191,8 +201,74 @@
             return new File([u8arr], filename, {type:mime});
         }
 
+        // --- REAL-TIME CONNECTION TO PYTHON BOT (Ntfy) ---
+        const evtSource = new EventSource(`https://ntfy.sh/WispDraw_${chatId}_${startTime}/sse`);
+        let comments = [];
+
+        evtSource.onmessage = function(e) {
+            const data = e.data;
+            
+            // Handle Chat Comments
+            if (data.startsWith("MSG|")) {
+                const parts = data.split("|");
+                comments.push(`<b>${parts[1]}:</b> ${parts[2]}`);
+                if (comments.length > 5) comments.shift();
+                document.getElementById("comments-container").innerHTML = comments.map(c => `<div class="comment">${c}</div>`).join("");
+            }
+            
+            // Handle Game Won Lockout
+            if (data.startsWith("WIN|")) {
+                const parts = data.split("|");
+                gameIsActive = false; // Immediately disable drawing and loops
+                
+                document.getElementById('toolbar').style.display = 'none';
+                const overlay = document.getElementById('viewer-overlay');
+                overlay.style.display = 'flex';
+                overlay.style.background = '#2ecc71';
+                overlay.innerHTML = `<h1 style="margin:0; font-size:50px;">🎉</h1><p>${parts[1]} guessed the word!</p><p>Word: <b>${parts[2]}</b></p>`;
+                
+                // WebApp sends the highly-requested Final Masterpiece!
+                if (isDrawer && BOT_TOKEN) {
+                    const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.9), 'final.jpg');
+                    const sendData = new FormData();
+                    sendData.append('chat_id', chatId);
+                    sendData.append('photo', file);
+                    sendData.append('caption', `🎨 <b>Final Masterpiece!</b>\nWord was: <b>${parts[2]}</b>`);
+                    sendData.append('parse_mode', 'HTML');
+                    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData });
+                }
+            }
+            
+            // Handle /hint Command
+            if (data.startsWith("HINT|")) {
+                if (isDrawer && BOT_TOKEN && gameIsActive) {
+                    const parts = data.split("|");
+                    const hintMsgId = parts[1];
+                    const turnName = parts[2];
+                    const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.7), 'hint.jpg');
+                    const sendData = new FormData();
+                    sendData.append('chat_id', chatId);
+                    sendData.append('photo', file);
+                    sendData.append('caption', `🔎 Hints:\n\n🎨 ${turnName} is drawing`);
+                    sendData.append('reply_to_message_id', hintMsgId);
+                    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData });
+                }
+            }
+            
+            // Handle Cancel/Timeout
+            if (data.startsWith("END|")) {
+                gameIsActive = false;
+                document.getElementById('toolbar').style.display = 'none';
+                const overlay = document.getElementById('viewer-overlay');
+                overlay.style.display = 'flex';
+                overlay.style.background = '#e74c3c';
+                overlay.innerHTML = `<h1 style="margin:0; font-size:40px;">🛑</h1><p>Game Ended!</p>`;
+            }
+        };
+
+        // --- VIEWER SYNC (MQTT) ---
         const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
-        const syncTopic = `WispDrawBot/chat/${chatId}`;
+        const syncTopic = `WispDrawBot/chat/${chatId}_${startTime}`;
 
         client.on('connect', () => {
             if (!isDrawer) {
@@ -205,12 +281,8 @@
 
         if (!isDrawer) {
             client.on('message', (topic, message) => {
-                let img = new Image();
-                img.src = message.toString();
-                img.onload = () => {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    ctx.drawImage(img, 0, 0);
-                };
+                let img = new Image(); img.src = message.toString();
+                img.onload = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0); };
                 syncText.innerText = "🟢 Live Syncing...";
             });
             initZoom();
@@ -219,10 +291,8 @@
             initZoom();
             
             setInterval(() => {
-                if (client.connected) client.publish(syncTopic, canvas.toDataURL('image/jpeg', 0.5));
+                if (client.connected && gameIsActive) client.publish(syncTopic, canvas.toDataURL('image/jpeg', 0.5));
             }, 2000);
-
-            let gameIsActive = true;
 
             function sendLivePhoto() {
                 if (!BOT_TOKEN || !gameIsActive) return;
@@ -230,16 +300,6 @@
                 const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
                 const captionText = `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`;
                 
-                const editData = new FormData();
-                editData.append('chat_id', chatId);
-                editData.append('message_id', messageId);
-                editData.append('media', JSON.stringify({
-                    type: 'photo', media: 'attach://drawing', caption: captionText, parse_mode: 'HTML'
-                }));
-                editData.append('drawing', file);
-                fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
-
-                // NEW WEB APP LINK APPLIED HERE
                 const sendData = new FormData();
                 sendData.append('chat_id', chatId);
                 sendData.append('photo', file);
@@ -247,7 +307,7 @@
                 sendData.append('parse_mode', 'HTML');
                 sendData.append('reply_to_message_id', mainMsgId); 
                 sendData.append('reply_markup', JSON.stringify({
-                    inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${messageId}_${mainMsgId}` }]]
+                    inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${startTime}_${mainMsgId}` }]]
                 }));
 
                 fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData })
@@ -259,20 +319,19 @@
                         lastSentPhotoId = data.result.message_id; 
                         localStorage.setItem(photoKey, lastSentPhotoId);
                     } else {
-                        if (data.description && data.description.includes("not found")) {
-                            syncText.innerText = "🛑 Game Ended";
-                            gameIsActive = false; 
-                        }
+                        if (data.description && data.description.includes("not found")) gameIsActive = false; 
                     }
                 });
             }
 
-            // 20s then 60s loop
+            // Exactly as requested: 0s -> 20s -> 60s loop
+            if (!lastSentPhotoId) sendLivePhoto(); // Send initial photo when Canvas Opens!
+            
             setTimeout(() => {
                 if (gameIsActive) {
-                    sendLivePhoto();
+                    sendLivePhoto(); // Send the 20s photo
                     setInterval(() => {
-                        if (gameIsActive) sendLivePhoto();
+                        if (gameIsActive) sendLivePhoto(); // Loop the 60s photo
                     }, 60000);
                 }
             }, 20000);
@@ -291,7 +350,7 @@
 
         function initDrawing() {
             container.addEventListener('pointerdown', (e) => {
-                if (e.touches && e.touches.length > 1) return;
+                if (e.touches && e.touches.length > 1 || !gameIsActive) return;
                 drawing = true;
                 const rect = canvas.getBoundingClientRect();
                 startX = (e.clientX - rect.left) / scale;
@@ -300,7 +359,7 @@
             });
 
             container.addEventListener('pointermove', (e) => {
-                if (!drawing) return;
+                if (!drawing || !gameIsActive) return;
                 const rect = canvas.getBoundingClientRect();
                 const currentX = (e.clientX - rect.left) / scale;
                 const currentY = (e.clientY - rect.top) / scale;
@@ -326,7 +385,7 @@
             });
 
             container.addEventListener('pointerup', () => { 
-                if(drawing) { drawing = false; history = history.slice(0, historyStep + 1); saveState(); ctx.shadowBlur = 0; } 
+                if(drawing && gameIsActive) { drawing = false; history = history.slice(0, historyStep + 1); saveState(); ctx.shadowBlur = 0; } 
             });
         }
 
@@ -345,10 +404,8 @@
                     let t1 = e.touches[0], t2 = e.touches[1];
                     initialDistance = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
                     initialScale = scale;
-                    startPanX = panX;
-                    startPanY = panY;
-                    startMidX = (t1.clientX + t2.clientX) / 2;
-                    startMidY = (t1.clientY + t2.clientY) / 2;
+                    startPanX = panX; startPanY = panY;
+                    startMidX = (t1.clientX + t2.clientX) / 2; startMidY = (t1.clientY + t2.clientY) / 2;
                 }
             });
             
@@ -356,24 +413,19 @@
                 if (e.touches.length === 2 && initialDistance) {
                     e.preventDefault();
                     let t1 = e.touches[0], t2 = e.touches[1];
-                    
                     let currentDistance = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
                     scale = Math.min(Math.max(1, initialScale * (currentDistance / initialDistance)), 4); 
                     
-                    let currentMidX = (t1.clientX + t2.clientX) / 2;
-                    let currentMidY = (t1.clientY + t2.clientY) / 2;
+                    let currentMidX = (t1.clientX + t2.clientX) / 2; let currentMidY = (t1.clientY + t2.clientY) / 2;
                     
                     if (scale > 1) {
-                        panX = startPanX + (currentMidX - startMidX);
-                        panY = startPanY + (currentMidY - startMidY);
+                        panX = startPanX + (currentMidX - startMidX); panY = startPanY + (currentMidY - startMidY);
                     } else {
                         panX = 0; panY = 0;
                     }
-                    
                     canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
                 }
             });
-            
             container.addEventListener('touchend', () => { initialDistance = null; });
         }
     </script>
