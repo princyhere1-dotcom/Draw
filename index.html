@@ -12,7 +12,6 @@
         
         #viewer-overlay { display: none; background: #ff4757; color: white; padding: 20px; text-align: center; font-weight: bold; font-size: 18px; z-index: 20; width: 100%; height: 100vh; box-sizing: border-box; align-items: center; justify-content: center; flex-direction: column; }
         
-        /* Upgraded Win Overlay - Fixed position to ensure it covers everything */
         #win-overlay { display: none; background: rgba(46, 204, 113, 0.95); color: white; position: fixed; top:0; left:0; width:100%; height:100%; z-index: 9999; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px; box-sizing: border-box; backdrop-filter: blur(8px); }
         .win-btn { padding: 14px 28px; font-size: 16px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: transform 0.2s; }
         .win-btn:active { transform: scale(0.95); }
@@ -20,7 +19,6 @@
         #canvas-container { flex: 1; overflow: hidden; position: relative; background: #ffffff; touch-action: none; width: 100%; border-radius: 0 0 20px 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5) inset; }
         canvas { position: absolute; top: 0; left: 0; transform-origin: top left; }
         
-        /* Professional Toolbar styling */
         #toolbar { 
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
             background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(15px);
@@ -38,7 +36,6 @@
         }
         button:active { background: #f0f0f0; transform: translateY(2px); }
         
-        /* Custom Color Wheel Button */
         #palette { display: flex; align-items: center; justify-content: center; border-right: 2px solid rgba(0,0,0,0.1); padding-right: 12px; }
         .color-wheel-wrapper {
             position: relative; width: 42px; height: 42px; border-radius: 50%;
@@ -51,7 +48,6 @@
             opacity: 0; width: 100%; height: 100%; position: absolute; top:0; left:0; cursor: pointer;
         }
 
-        /* Brush Slider Size Upgraded for easier touching */
         #brushSize { 
             width: 180px; 
             height: 20px; 
@@ -131,8 +127,7 @@
     </div>
 
     <script>
-        // NOTE: Enter your new Bot token here
-        window.TG_BOT_TOKEN = "8689950961:AAHXnJPIM_uKlj6fJqpsB86eQPWHuDHf9EQ"; 
+        window.TG_BOT_TOKEN = "8447617103:AAFjme7hNZ_VnsxMofxPVJL86M_UGRsEwgY"; 
         
         const tg = window.Telegram.WebApp;
         tg.expand();
@@ -147,7 +142,7 @@
             const overlay = document.getElementById('viewer-overlay');
             overlay.style.display = 'flex';
             overlay.style.background = '#1e1e24';
-            overlay.innerHTML = '<h1 style="margin:0; font-size:50px;">🛑</h1><p>Game is over.</p>';
+            overlay.innerHTML = '<h1 style="margin:0; font-size:50px;">🛑</h1><p>Game is over.</p><p>You probably tapped on old buttons!</p>';
             throw new Error("Game Over"); 
         }
         
@@ -169,7 +164,6 @@
         let gameIsActive = true;
         let keepDrawing = false; 
 
-        // Comments Minimize Logic
         let commentsVisible = true;
         document.getElementById('toggleCommentsBtn').onclick = (e) => {
             commentsVisible = !commentsVisible;
@@ -177,13 +171,11 @@
             e.target.innerText = commentsVisible ? '🔽 Hide' : '🔼 Show';
         };
 
-        // Reset to solid brush if color is changed from eraser
         document.getElementById('colorPicker').addEventListener('input', () => {
             let tool = document.getElementById('toolSelect').value;
             if (tool === 'eraser') document.getElementById('toolSelect').value = 'solid';
         });
 
-        // Fixed DPI Scaling for High-Res Mobile Screens
         const dpr = window.devicePixelRatio || 1;
         canvas.width = window.innerWidth * dpr;
         
@@ -332,7 +324,7 @@
                         const overlay = document.getElementById('viewer-overlay');
                         overlay.style.display = 'flex';
                         overlay.style.background = '#2ecc71';
-                        overlay.innerHTML = `<h1 style="margin:0; font-size:60px;">🎉</h1><p>${parts[1]} guessed it!</p><p>Word: <b>${parts[2]}</b></p>`;
+                        overlay.innerHTML = `<h1 style="margin:0; font-size:60px;">🎉</h1><p>${parts[1]} guessed the word!</p><p>Word: <b>${parts[2]}</b></p>`;
                     }
                 }
                 
@@ -573,7 +565,6 @@
                 
                 const rect = canvas.getBoundingClientRect();
                 
-                // Fixed explicit coordinate scaling to prevent drawing offset bugs when zoomed
                 startX = ((e.clientX - rect.left) / scale) * dpr;
                 startY = ((e.clientY - rect.top) / scale) * dpr;
                 
@@ -593,7 +584,6 @@
                 if (!drawing || (!gameIsActive && !keepDrawing)) return;
                 const rect = canvas.getBoundingClientRect();
                 
-                // Fixed explicit coordinate scaling for live drawing tracking
                 const currentX = ((e.clientX - rect.left) / scale) * dpr;
                 const currentY = ((e.clientY - rect.top) / scale) * dpr;
                 
@@ -605,7 +595,6 @@
                 ctx.fillStyle = color;
                 ctx.lineWidth = size;
                 
-                // Professional Brushes Setup
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
                 ctx.globalCompositeOperation = 'source-over';
@@ -622,7 +611,6 @@
                     ctx.shadowColor = color;
                 }
 
-                // Spray brush has custom dot generation instead of a solid line
                 if (tool === 'spray') {
                     ctx.fillStyle = color;
                     let density = Math.max(10, size * 2.5);
