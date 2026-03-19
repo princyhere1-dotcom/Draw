@@ -62,7 +62,6 @@
         .comment b { color: #feca57; }
         @keyframes fadeIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
 
-        /* FIXED DIALOG BOX UI */
         #dialog-overlay { display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.5); z-index:90; backdrop-filter: blur(2px); }
         #word-dialog { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#2c3e50; padding:20px; border-radius:15px; z-index:100; color:white; width: 85%; max-width: 320px; box-sizing: border-box; font-family: sans-serif; box-shadow:0 10px 40px rgba(0,0,0,0.6); }
         .dialog-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
@@ -200,10 +199,8 @@
             document.getElementById('top-bar').style.display = 'none';
         }
 
-        // --- FIXED BOT COMMAND LOGIC ---
+        // Send check/action to server
         function sendBotCommand(cmd) {
-            if (!isDrawer) return;
-            // Sends command to a global listener in Python
             fetch(`https://ntfy.envs.net/WispDraw_Up_Global`, {
                 method: 'POST',
                 body: `${chatId}|${drawerId}|${startTime}|${cmd}`
@@ -259,7 +256,6 @@
         });
 
         const dpr = window.devicePixelRatio || 1;
-        // Perfect Square Mapping
         canvas.width = window.innerWidth * dpr;
         canvas.height = window.innerWidth * dpr;
         canvas.style.width = window.innerWidth + 'px';
@@ -367,6 +363,19 @@
                 if (parsed.event !== "message") return;
                 const data = parsed.message;
 
+                // DEAD SIGNAL TRIGGER (Old button clicked)
+                if (data.startsWith("DEAD|")) {
+                    if (keepDrawing) return; // Prevent ruining a post-win drawing session
+                    gameIsActive = false;
+                    keepDrawing = false;
+                    document.getElementById('toolbar').style.display = 'none';
+                    document.getElementById('top-bar').style.display = 'none';
+                    const overlay = document.getElementById('viewer-overlay');
+                    overlay.style.display = 'flex';
+                    overlay.style.background = '#ff4757';
+                    overlay.innerHTML = `<h1 style="margin:0; font-size:50px;">🛑</h1><p style="padding: 0 20px;">Game over, you probably pressed old buttons!</p>`;
+                }
+
                 if (data.startsWith("WORD|")) {
                     const word = data.split("|")[1];
                     document.getElementById('current-word-display').innerText = word;
@@ -450,9 +459,10 @@
             if (!isDrawer) {
                 syncText.innerText = "🔵 Connected! Waiting for drawer...";
                 client.subscribe(syncTopic);
+                sendBotCommand('CHECK'); // Validate viewer link
             } else {
                 syncText.innerText = "🟢 Sync Active";
-                sendBotCommand('OPENED');
+                sendBotCommand('OPENED'); // Validate drawer link & trigger word send
             }
         });
 
@@ -744,7 +754,6 @@
             });
         }
 
-        // --- FIXED ZOOM LOGIC ---
         function initZoom() {
             let initialDistance = null;
             let initialScale = 1;
@@ -754,53 +763,39 @@
             let startMidY = 0;
 
             container.addEventListener('touchstart', e => {
-                if (e.touches.length > 1) {
+                if (e.touches.length === 2) {
                     isZooming = true;
-                    drawing = false; 
+                    drawing = false;
                     let t1 = e.touches[0], t2 = e.touches[1];
                     initialDistance = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
                     initialScale = scale;
-                    startPanX = panX; 
-                    startPanY = panY;
-                    startMidX = (t1.clientX + t2.clientX) / 2; 
-                    startMidY = (t1.clientY + t2.clientY) / 2;
+                    startPanX = panX; startPanY = panY;
+                    startMidX = (t1.clientX + t2.clientX) / 2; startMidY = (t1.clientY + t2.clientY) / 2;
                 }
             });
             
             container.addEventListener('touchmove', e => {
-                if (e.touches.length > 1 && initialDistance) {
+                if (e.touches.length === 2 && initialDistance) {
                     e.preventDefault();
                     let t1 = e.touches[0], t2 = e.touches[1];
                     let currentDistance = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
                     let newScale = Math.min(Math.max(1, initialScale * (currentDistance / initialDistance)), 5); 
                     
-                    let currentMidX = (t1.clientX + t2.clientX) / 2; 
-                    let currentMidY = (t1.clientY + t2.clientY) / 2;
-                    
-                    let deltaX = currentMidX - startMidX;
-                    let deltaY = currentMidY - startMidY;
-
-                    // Perfect center-zoom calculation
+                    let currentMidX = (t1.clientX + t2.clientX) / 2; let currentMidY = (t1.clientY + t2.clientY) / 2;
+                    let deltaX = currentMidX - startMidX; let deltaY = currentMidY - startMidY;
                     let rect = container.getBoundingClientRect();
-                    let pointX = startMidX - rect.left - startPanX;
-                    let pointY = startMidY - rect.top - startPanY;
-
+                    let pointX = startMidX - rect.left - startPanX; let pointY = startMidY - rect.top - startPanY;
                     let pX = startPanX + deltaX - pointX * (newScale / initialScale - 1);
                     let pY = startPanY + deltaY - pointY * (newScale / initialScale - 1);
                     
-                    // Constrain bounds to keep canvas on screen
                     if (newScale === 1) { pX = 0; pY = 0; }
-                    let minPanX = rect.width * (1 - newScale);
-                    let minPanY = rect.height * (1 - newScale);
+                    let minPanX = rect.width * (1 - newScale); let minPanY = rect.height * (1 - newScale);
                     
-                    panX = Math.max(minPanX, Math.min(0, pX));
-                    panY = Math.max(minPanY, Math.min(0, pY));
+                    panX = Math.max(minPanX, Math.min(0, pX)); panY = Math.max(minPanY, Math.min(0, pY));
                     scale = newScale;
-
                     canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
                 }
             });
-            
             container.addEventListener('touchend', (e) => { 
                 if (e.touches.length < 2) {
                     isZooming = false;
