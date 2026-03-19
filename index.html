@@ -62,38 +62,47 @@
         .comment b { color: #feca57; }
         @keyframes fadeIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
 
-        #word-dialog { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#2c3e50; padding:25px; border-radius:15px; z-index:100; color:white; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.6); width: 85%; max-width: 320px; box-sizing: border-box; font-family: sans-serif; }
-        #word-dialog h3 { margin: 0 0 20px 0; font-size: 22px; font-weight: 600; }
-        #word-dialog button { cursor: pointer; border: none; font-weight: bold; border-radius: 8px; padding: 12px 20px; width: 100%; margin-bottom: 10px; font-size: 16px; color: white; transition: 0.2s; }
-        #word-dialog button:active { transform: scale(0.97); }
+        /* FIXED DIALOG BOX UI */
+        #dialog-overlay { display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.5); z-index:90; backdrop-filter: blur(2px); }
+        #word-dialog { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#2c3e50; padding:20px; border-radius:15px; z-index:100; color:white; width: 85%; max-width: 320px; box-sizing: border-box; font-family: sans-serif; box-shadow:0 10px 40px rgba(0,0,0,0.6); }
+        .dialog-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+        .dialog-title { margin: 0; font-size: 18px; font-weight: bold; text-align: left; line-height: 1.4; }
+        .dialog-title span { color: #f1c40f; font-size: 24px; display: block; margin-top: 5px; }
+        #closeDialogBtn { background: transparent; border: none; color: #aaa; font-size: 24px; font-weight: bold; padding: 0; margin-top: -5px; cursor: pointer; }
+        #closeDialogBtn:active { color: white; transform: scale(0.9); }
+        
+        #word-dialog button.action-btn { cursor: pointer; border: none; font-weight: bold; border-radius: 8px; padding: 12px 20px; width: 100%; margin-bottom: 10px; font-size: 16px; color: white; transition: 0.2s; text-align: center; }
+        #word-dialog button.action-btn:active { transform: scale(0.97); }
         #nextWordBtn { background: #3498db; }
         #writeWordBtn { background: #2ecc71; margin-bottom: 0; }
-        #closeDialogBtn { position: absolute; top: 10px; right: 10px; background: transparent; color: #aaa; width: auto; padding: 5px; margin: 0; font-size: 20px; }
-        #closeDialogBtn:active { transform: none; color: white; }
+        
         #word-input-container { display: none; }
-        #customWordInput { width: 100%; padding: 12px; border-radius: 8px; border: none; box-sizing: border-box; margin-bottom: 15px; font-size: 16px; text-align: center; outline: none; }
+        #customWordInput { width: 100%; padding: 12px; border-radius: 8px; border: none; box-sizing: border-box; margin-bottom: 15px; font-size: 16px; outline: none; text-align: center; }
         #saveCustomWordBtn { background: #e67e22; margin-bottom: 0; }
-        #dialog-overlay { display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.5); z-index:90; backdrop-filter: blur(2px); }
     </style>
 </head>
 <body>
     <div id="top-bar" onclick="openWordDialog()">
-        <span id="current-word-display">Loading...</span> &nbsp;⚙️
+        Your word: &nbsp;<span id="current-word-display">Loading...</span> &nbsp;⚙️
     </div>
     <div id="status-bar"><span id="syncText">🟡 Waiting...</span></div>
     
     <div id="dialog-overlay" onclick="closeWordDialog()"></div>
     <div id="word-dialog">
-        <button id="closeDialogBtn" onclick="closeWordDialog()">✖</button>
-        <h3>Your word: <br><span id="dialog-word-text" style="color:#f1c40f; font-size: 26px; display:inline-block; margin-top:8px;">...</span></h3>
-        <div id="word-buttons">
-            <button id="nextWordBtn">Next</button>
-            <button id="writeWordBtn">Write your word</button>
+        <div class="dialog-header">
+            <div class="dialog-title">Your word: <br><span id="dialog-word-text">Loading...</span></div>
+            <button id="closeDialogBtn" onclick="closeWordDialog()">✖</button>
         </div>
+        
+        <div id="word-buttons">
+            <button id="nextWordBtn" class="action-btn">Next</button>
+            <button id="writeWordBtn" class="action-btn">Write your word</button>
+        </div>
+        
         <div id="word-input-container">
-            <p style="margin:0 0 10px 0; font-size:15px; color:#ddd;">Write your word here:</p>
+            <p style="margin:0 0 10px 0; font-size:15px; color:#ddd; text-align:left;">Write your word here:</p>
             <input type="text" id="customWordInput" placeholder="Type a word...">
-            <button id="saveCustomWordBtn">Set Word</button>
+            <button id="saveCustomWordBtn" class="action-btn">Set Word</button>
         </div>
     </div>
 
@@ -191,6 +200,16 @@
             document.getElementById('top-bar').style.display = 'none';
         }
 
+        // --- FIXED BOT COMMAND LOGIC ---
+        function sendBotCommand(cmd) {
+            if (!isDrawer) return;
+            // Sends command to a global listener in Python
+            fetch(`https://ntfy.envs.net/WispDraw_Up_Global`, {
+                method: 'POST',
+                body: `${chatId}|${drawerId}|${startTime}|${cmd}`
+            }).catch(()=>{});
+        }
+
         function openWordDialog() {
             if(!isDrawer || !gameIsActive) return;
             document.getElementById('dialog-overlay').style.display = 'block';
@@ -206,10 +225,7 @@
         }
 
         document.getElementById('nextWordBtn').onclick = () => {
-            fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/sendMessage`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chat_id: drawerId, text: `/web_next ${chatId}` })
-            });
+            sendBotCommand('NEXT');
             document.getElementById('dialog-word-text').innerText = "Changing...";
             setTimeout(closeWordDialog, 500);
         };
@@ -223,10 +239,7 @@
         document.getElementById('saveCustomWordBtn').onclick = () => {
             const newWord = document.getElementById('customWordInput').value.trim();
             if(newWord) {
-                fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/sendMessage`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: drawerId, text: `/web_setword ${chatId} ${newWord}` })
-                });
+                sendBotCommand(`SETWORD|${newWord}`);
                 document.getElementById('current-word-display').innerText = newWord;
                 document.getElementById('dialog-word-text').innerText = newWord;
                 closeWordDialog();
@@ -246,7 +259,7 @@
         });
 
         const dpr = window.devicePixelRatio || 1;
-        // Set canvas to square based on window width
+        // Perfect Square Mapping
         canvas.width = window.innerWidth * dpr;
         canvas.height = window.innerWidth * dpr;
         canvas.style.width = window.innerWidth + 'px';
@@ -439,11 +452,7 @@
                 client.subscribe(syncTopic);
             } else {
                 syncText.innerText = "🟢 Sync Active";
-                // Let the bot know we opened the canvas so it can send the initial word
-                fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/sendMessage`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: drawerId, text: `/web_opened ${chatId}` })
-                });
+                sendBotCommand('OPENED');
             }
         });
 
@@ -642,7 +651,6 @@
 
         function initDrawing() {
             container.addEventListener('pointerdown', (e) => {
-                // Prevent drawing when zooming or accidentally touching with second finger
                 if (e.pointerType === 'touch' && !e.isPrimary) return;
                 if (isZooming || (e.touches && e.touches.length > 1) || (!gameIsActive && !keepDrawing)) return;
                 
@@ -736,6 +744,7 @@
             });
         }
 
+        // --- FIXED ZOOM LOGIC ---
         function initZoom() {
             let initialDistance = null;
             let initialScale = 1;
@@ -751,8 +760,10 @@
                     let t1 = e.touches[0], t2 = e.touches[1];
                     initialDistance = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
                     initialScale = scale;
-                    startPanX = panX; startPanY = panY;
-                    startMidX = (t1.clientX + t2.clientX) / 2; startMidY = (t1.clientY + t2.clientY) / 2;
+                    startPanX = panX; 
+                    startPanY = panY;
+                    startMidX = (t1.clientX + t2.clientX) / 2; 
+                    startMidY = (t1.clientY + t2.clientY) / 2;
                 }
             });
             
@@ -761,15 +772,31 @@
                     e.preventDefault();
                     let t1 = e.touches[0], t2 = e.touches[1];
                     let currentDistance = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
-                    scale = Math.min(Math.max(1, initialScale * (currentDistance / initialDistance)), 4); 
+                    let newScale = Math.min(Math.max(1, initialScale * (currentDistance / initialDistance)), 5); 
                     
-                    let currentMidX = (t1.clientX + t2.clientX) / 2; let currentMidY = (t1.clientY + t2.clientY) / 2;
+                    let currentMidX = (t1.clientX + t2.clientX) / 2; 
+                    let currentMidY = (t1.clientY + t2.clientY) / 2;
                     
-                    if (scale > 1) {
-                        panX = startPanX + (currentMidX - startMidX); panY = startPanY + (currentMidY - startMidY);
-                    } else {
-                        panX = 0; panY = 0;
-                    }
+                    let deltaX = currentMidX - startMidX;
+                    let deltaY = currentMidY - startMidY;
+
+                    // Perfect center-zoom calculation
+                    let rect = container.getBoundingClientRect();
+                    let pointX = startMidX - rect.left - startPanX;
+                    let pointY = startMidY - rect.top - startPanY;
+
+                    let pX = startPanX + deltaX - pointX * (newScale / initialScale - 1);
+                    let pY = startPanY + deltaY - pointY * (newScale / initialScale - 1);
+                    
+                    // Constrain bounds to keep canvas on screen
+                    if (newScale === 1) { pX = 0; pY = 0; }
+                    let minPanX = rect.width * (1 - newScale);
+                    let minPanY = rect.height * (1 - newScale);
+                    
+                    panX = Math.max(minPanX, Math.min(0, pX));
+                    panY = Math.max(minPanY, Math.min(0, pY));
+                    scale = newScale;
+
                     canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
                 }
             });
