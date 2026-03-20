@@ -157,8 +157,20 @@
     </div>
 
     <script>
-        window.TG_BOT_TOKEN = "8689950961:AAGw1ha1WAC7Uv9L_cb9cPeK1j3i2JjSNls"; 
+        window.TG_BOT_TOKEN = "8689950961:AAGDkoKIG8TRcRT3mlYkTu8GITLMD1LojjI"; 
         
+        // --- ANTI SPAM SYSTEM FOR WEBAPP ---
+        let spamCooldowns = {};
+        function checkSpam(actionId, cooldownMs) {
+            const now = Date.now();
+            if (now - (spamCooldowns[actionId] || 0) < cooldownMs) {
+                return false; // Spam detected, stop execution
+            }
+            spamCooldowns[actionId] = now;
+            return true; // Safe to proceed
+        }
+        // -----------------------------------
+
         const tg = window.Telegram.WebApp;
         tg.expand();
         if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
@@ -201,6 +213,8 @@
 
         // Send check/action to server
         function sendBotCommand(cmd) {
+            if (!checkSpam('ntfy_call', 1000)) return; // Prevents spamming the NTFY server
+
             fetch(`https://ntfy.envs.net/WispDraw_Up_Global`, {
                 method: 'POST',
                 body: `${chatId}|${drawerId}|${startTime}|${cmd}`
@@ -209,6 +223,8 @@
 
         function openWordDialog() {
             if(!isDrawer || !gameIsActive) return;
+            if (!checkSpam('open_dialog', 500)) return; // Anti button mashing
+            
             document.getElementById('dialog-overlay').style.display = 'block';
             document.getElementById('word-dialog').style.display = 'block';
             document.getElementById('word-buttons').style.display = 'block';
@@ -222,6 +238,8 @@
         }
 
         document.getElementById('nextWordBtn').onclick = () => {
+            if (!checkSpam('next_word_btn', 1500)) return; // 1.5s cooldown
+
             sendBotCommand('NEXT');
             document.getElementById('dialog-word-text').innerText = "Changing...";
             setTimeout(closeWordDialog, 500);
@@ -234,6 +252,8 @@
         };
 
         document.getElementById('saveCustomWordBtn').onclick = () => {
+            if (!checkSpam('save_word_btn', 1500)) return; // 1.5s cooldown
+
             const newWord = document.getElementById('customWordInput').value.trim();
             if(newWord) {
                 sendBotCommand(`SETWORD|${newWord}`);
@@ -330,11 +350,14 @@
         }
         
         document.getElementById('keepDrawingBtn').onclick = () => {
+            if (!checkSpam('keep_drawing_btn', 2000)) return; // 2s cooldown
             document.getElementById('win-overlay').style.display = 'none';
             keepDrawing = true; 
         };
 
         document.getElementById('closeCanvasBtn').onclick = () => {
+            if (!checkSpam('close_canvas_btn', 3000)) return; // 3s cooldown to prevent API double-calls
+
             if (keepDrawing && window.TG_BOT_TOKEN && window.finalMessageId) {
                 const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
                 const editData = new FormData();
