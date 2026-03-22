@@ -157,17 +157,13 @@
     </div>
 
     <script>
-        // --- ANTI SPAM SYSTEM FOR WEBAPP ---
         let spamCooldowns = {};
         function checkSpam(actionId, cooldownMs) {
             const now = Date.now();
-            if (now - (spamCooldowns[actionId] || 0) < cooldownMs) {
-                return false;
-            }
+            if (now - (spamCooldowns[actionId] || 0) < cooldownMs) return false;
             spamCooldowns[actionId] = now;
             return true;
         }
-        // -----------------------------------
 
         const tg = window.Telegram.WebApp;
         tg.expand();
@@ -205,13 +201,10 @@
         let gameIsActive = true;
         let keepDrawing = false; 
 
-        if (!isDrawer) {
-            document.getElementById('top-bar').style.display = 'none';
-        }
+        if (!isDrawer) document.getElementById('top-bar').style.display = 'none';
 
         function sendBotCommand(cmd) {
             if (!checkSpam('ntfy_call', 1000)) return;
-
             fetch(`https://ntfy.envs.net/WispDraw_Up_Global`, {
                 method: 'POST',
                 body: `${chatId}|${drawerId}|${startTime}|${cmd}`
@@ -220,13 +213,34 @@
 
         async function uploadImage(dataUrl) {
             const file = dataURLtoFile(dataUrl, 'image.jpg');
-            const fd = new FormData();
-            fd.append('file', file);
-            try {
-                let res = await fetch('https://graph.org/upload', {method: 'POST', body: fd});
-                let json = await res.json();
-                return 'https://graph.org' + json[0].src;
-            } catch(e) { return null; }
+            
+            const endpoints = [
+                { url: 'https://catbox.moe/user/api.php', fileField: 'fileToUpload', extra: { reqtype: 'fileupload' } },
+                { url: 'https://tmpfiles.org/api/v1/upload', fileField: 'file' },
+                { url: 'https://envs.sh', fileField: 'file' }
+            ];
+
+            for (let ep of endpoints) {
+                try {
+                    let fd = new FormData();
+                    fd.append(ep.fileField, file);
+                    if (ep.extra) {
+                        for (let k in ep.extra) fd.append(k, ep.extra[k]);
+                    }
+
+                    let res = await fetch(ep.url, { method: 'POST', body: fd });
+                    if (!res.ok) continue;
+
+                    if (ep.url.includes('tmpfiles')) {
+                        let json = await res.json();
+                        if (json.status === 'success') return json.data.url.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
+                    } else {
+                        let text = await res.text();
+                        if (text.startsWith('http')) return text.trim();
+                    }
+                } catch(e) { continue; }
+            }
+            return null;
         }
 
         function openWordDialog() {
@@ -247,7 +261,6 @@
 
         document.getElementById('nextWordBtn').onclick = () => {
             if (!checkSpam('next_word_btn', 1500)) return;
-
             sendBotCommand('NEXT');
             document.getElementById('dialog-word-text').innerText = "Changing...";
             setTimeout(closeWordDialog, 500);
@@ -261,7 +274,6 @@
 
         document.getElementById('saveCustomWordBtn').onclick = () => {
             if (!checkSpam('save_word_btn', 1500)) return;
-
             const newWord = document.getElementById('customWordInput').value.trim();
             if(newWord) {
                 sendBotCommand(`SETWORD|${newWord}`);
