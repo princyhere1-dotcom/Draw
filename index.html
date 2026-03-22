@@ -157,17 +157,15 @@
     </div>
 
     <script>
-        window.TG_BOT_TOKEN = "8689950961:AAGDkoKIG8TRcRT3mlYkTu8GITLMD1LojjI"; // IMPORTANT: Put your NEW token here
-        
         // --- ANTI SPAM SYSTEM FOR WEBAPP ---
         let spamCooldowns = {};
         function checkSpam(actionId, cooldownMs) {
             const now = Date.now();
             if (now - (spamCooldowns[actionId] || 0) < cooldownMs) {
-                return false; // Spam detected, stop execution
+                return false;
             }
             spamCooldowns[actionId] = now;
-            return true; // Safe to proceed
+            return true;
         }
         // -----------------------------------
 
@@ -211,9 +209,8 @@
             document.getElementById('top-bar').style.display = 'none';
         }
 
-        // Send check/action to server
         function sendBotCommand(cmd) {
-            if (!checkSpam('ntfy_call', 1000)) return; // Prevents spamming the NTFY server
+            if (!checkSpam('ntfy_call', 1000)) return;
 
             fetch(`https://ntfy.envs.net/WispDraw_Up_Global`, {
                 method: 'POST',
@@ -221,9 +218,20 @@
             }).catch(()=>{});
         }
 
+        async function uploadImage(dataUrl) {
+            const file = dataURLtoFile(dataUrl, 'image.jpg');
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                let res = await fetch('https://graph.org/upload', {method: 'POST', body: fd});
+                let json = await res.json();
+                return 'https://graph.org' + json[0].src;
+            } catch(e) { return null; }
+        }
+
         function openWordDialog() {
             if(!isDrawer || !gameIsActive) return;
-            if (!checkSpam('open_dialog', 500)) return; // Anti button mashing
+            if (!checkSpam('open_dialog', 500)) return;
             
             document.getElementById('dialog-overlay').style.display = 'block';
             document.getElementById('word-dialog').style.display = 'block';
@@ -238,7 +246,7 @@
         }
 
         document.getElementById('nextWordBtn').onclick = () => {
-            if (!checkSpam('next_word_btn', 1500)) return; // 1.5s cooldown
+            if (!checkSpam('next_word_btn', 1500)) return;
 
             sendBotCommand('NEXT');
             document.getElementById('dialog-word-text').innerText = "Changing...";
@@ -252,7 +260,7 @@
         };
 
         document.getElementById('saveCustomWordBtn').onclick = () => {
-            if (!checkSpam('save_word_btn', 1500)) return; // 1.5s cooldown
+            if (!checkSpam('save_word_btn', 1500)) return;
 
             const newWord = document.getElementById('customWordInput').value.trim();
             if(newWord) {
@@ -350,45 +358,34 @@
         }
         
         document.getElementById('keepDrawingBtn').onclick = () => {
-            if (!checkSpam('keep_drawing_btn', 2000)) return; // 2s cooldown
+            if (!checkSpam('keep_drawing_btn', 2000)) return;
             document.getElementById('win-overlay').style.display = 'none';
             keepDrawing = true; 
         };
 
-        document.getElementById('closeCanvasBtn').onclick = () => {
-            if (!checkSpam('close_canvas_btn', 3000)) return; // 3s cooldown to prevent API double-calls
-
-            if (keepDrawing && window.TG_BOT_TOKEN && window.finalMessageId) {
-                const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
-                const editData = new FormData();
-                editData.append('chat_id', chatId);
-                editData.append('message_id', window.finalMessageId);
-                editData.append('media', JSON.stringify({
-                    type: 'photo', media: 'attach://drawing', 
-                    caption: `🎨 <b>Final Masterpiece!</b>\nWord was: <b>${window.finalWord}</b>`, 
-                    parse_mode: 'HTML'
-                }));
-                editData.append('drawing', file);
-                fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData})
-                .then(() => tg.close())
-                .catch(() => tg.close());
-            } else {
-                tg.close();
+        document.getElementById('closeCanvasBtn').onclick = async () => {
+            if (!checkSpam('close_canvas_btn', 3000)) return;
+            if (keepDrawing && window.finalMessageId) {
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                const imgUrl = await uploadImage(dataUrl);
+                if (imgUrl) {
+                    sendBotCommand(`IMG_FINAL_EDIT|${window.finalMessageId}|${window.finalWord}|${imgUrl}`);
+                }
             }
+            tg.close();
         };
 
         const evtSource = new EventSource(`https://ntfy.envs.net/WispDraw_${chatId}_${startTime}/sse`);
         let comments = [];
 
-        evtSource.onmessage = function(e) {
+        evtSource.onmessage = async function(e) {
             try {
                 const parsed = JSON.parse(e.data);
                 if (parsed.event !== "message") return;
                 const data = parsed.message;
 
-                // DEAD SIGNAL TRIGGER (Old button clicked)
                 if (data.startsWith("DEAD|")) {
-                    if (keepDrawing) return; // Prevent ruining a post-win drawing session
+                    if (keepDrawing) return;
                     gameIsActive = false;
                     keepDrawing = false;
                     document.getElementById('toolbar').style.display = 'none';
@@ -412,6 +409,17 @@
                     document.getElementById("comments-container").innerHTML = comments.map(c => `<div class="comment">${c}</div>`).join("");
                 }
                 
+                if (data.startsWith("PHOTO_ID|")) {
+                    const msgId = data.split("|")[1];
+                    syncText.innerText = "🟢 Sent Photo";
+                    lastSentPhotoId = msgId;
+                    localStorage.setItem(photoKey, msgId);
+                }
+                
+                if (data.startsWith("FINAL_PHOTO_ID|")) {
+                    window.finalMessageId = data.split("|")[1];
+                }
+
                 if (data.startsWith("WIN|")) {
                     const parts = data.split("|");
                     gameIsActive = false; 
@@ -422,21 +430,10 @@
                         document.getElementById('win-overlay').style.display = 'flex';
                         document.getElementById('win-text').innerHTML = `<b>${parts[1]}</b> found the word!<br><br>Word: <b>${window.finalWord}</b>`;
                         
-                        if (window.TG_BOT_TOKEN) {
-                            if (lastSentPhotoId) {
-                                fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/deleteMessage?chat_id=${chatId}&message_id=${lastSentPhotoId}`);
-                            }
-                            const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.9), 'final.jpg');
-                            const sendData = new FormData();
-                            sendData.append('chat_id', chatId);
-                            sendData.append('photo', file);
-                            sendData.append('caption', `🎨 <b>Final Masterpiece!</b>\nWord was: <b>${window.finalWord}</b>`);
-                            sendData.append('parse_mode', 'HTML');
-                            fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData })
-                            .then(r => r.json())
-                            .then(res => {
-                                if (res.ok) window.finalMessageId = res.result.message_id; 
-                            });
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                        const imgUrl = await uploadImage(dataUrl);
+                        if (imgUrl) {
+                            sendBotCommand(`IMG_FINAL|${window.finalWord}|${lastSentPhotoId || ''}|${imgUrl}`);
                         }
                     } else {
                         document.getElementById('toolbar').style.display = 'none';
@@ -448,17 +445,15 @@
                 }
                 
                 if (data.startsWith("HINT|")) {
-                    if (isDrawer && window.TG_BOT_TOKEN && (gameIsActive || keepDrawing)) {
+                    if (isDrawer && (gameIsActive || keepDrawing)) {
                         const parts = data.split("|");
                         const hintMsgId = parts[1];
                         const turnName = parts[2];
-                        const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.7), 'hint.jpg');
-                        const sendData = new FormData();
-                        sendData.append('chat_id', chatId);
-                        sendData.append('photo', file);
-                        sendData.append('caption', `🔎 Hints:\n\n🎨 ${turnName} is drawing`);
-                        sendData.append('reply_to_message_id', hintMsgId);
-                        fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData });
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                        const imgUrl = await uploadImage(dataUrl);
+                        if (imgUrl) {
+                            sendBotCommand(`IMG_HINT|${hintMsgId}|${turnName}|${imgUrl}`);
+                        }
                     }
                 }
                 
@@ -482,10 +477,10 @@
             if (!isDrawer) {
                 syncText.innerText = "🔵 Connected! Waiting for drawer...";
                 client.subscribe(syncTopic);
-                sendBotCommand('CHECK'); // Validate viewer link
+                sendBotCommand('CHECK');
             } else {
                 syncText.innerText = "🟢 Sync Active";
-                sendBotCommand('OPENED'); // Validate drawer link & trigger word send
+                sendBotCommand('OPENED');
             }
         });
 
@@ -504,34 +499,19 @@
                 if (client.connected && (gameIsActive || keepDrawing)) client.publish(syncTopic, canvas.toDataURL('image/jpeg', 0.5));
             }, 2000);
 
-            function sendLivePhoto(captionType) {
-                if (!window.TG_BOT_TOKEN || !gameIsActive) return;
+            async function sendLivePhoto(captionType) {
+                if (!gameIsActive) return;
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                const imgUrl = await uploadImage(dataUrl);
+                if (!imgUrl) return;
 
-                const file = dataURLtoFile(canvas.toDataURL('image/jpeg', 0.8), 'drawing.jpg');
-                let captionText = captionType === 'initial' ? "<b>Live Drawing...</b> 🖌️" : `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`;
-                
-                const sendData = new FormData();
-                sendData.append('chat_id', chatId);
-                sendData.append('photo', file);
-                sendData.append('caption', captionText);
-                sendData.append('parse_mode', 'HTML');
-                sendData.append('reply_to_message_id', mainMsgId); 
-                sendData.append('reply_markup', JSON.stringify({
-                    inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/Crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${startTime}_${mainMsgId}` }]]
-                }));
-
-                fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/sendPhoto`, { method: 'POST', body: sendData })
-                .then(r => r.json())
-                .then(data => {
-                    if(data.ok) {
-                        syncText.innerText = "🟢 Sent Photo";
-                        if (lastSentPhotoId) fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/deleteMessage?chat_id=${chatId}&message_id=${lastSentPhotoId}`);
-                        lastSentPhotoId = data.result.message_id; 
-                        localStorage.setItem(photoKey, lastSentPhotoId);
-                    } else {
-                        if (data.description && data.description.includes("not found")) gameIsActive = false; 
+                if (captionType === 'initial') {
+                    sendBotCommand(`IMG_INIT|${mainMsgId}|${imgUrl}`);
+                } else {
+                    if (lastSentPhotoId) {
+                        sendBotCommand(`IMG_UPDATE|${lastSentPhotoId}|${mainMsgId}|${drawerName}|${imgUrl}`);
                     }
-                });
+                }
             }
 
             const initialSentKey = `initSent_${chatId}_${startTime}`;
@@ -552,40 +532,20 @@
 
             let lastCanvasData = ""; 
 
-            setInterval(() => {
-                if (window.TG_BOT_TOKEN) {
-                    const currentData = canvas.toDataURL('image/jpeg', 0.8);
-                    if (currentData === lastCanvasData) return; 
-                    
-                    if (gameIsActive && lastSentPhotoId) {
-                        const file = dataURLtoFile(currentData, 'drawing.jpg');
-                        const editData = new FormData();
-                        editData.append('chat_id', chatId);
-                        editData.append('message_id', lastSentPhotoId);
-                        editData.append('media', JSON.stringify({
-                            type: 'photo', media: 'attach://drawing', 
-                            caption: `<b><a href="tg://user?id=${drawerId}">${drawerName}</a></b> is drawing 🎨\n\nGuess the word!`, 
-                            parse_mode: 'HTML'
-                        }));
-                        editData.append('drawing', file);
-                        editData.append('reply_markup', JSON.stringify({
-                            inline_keyboard: [[{text: "🎨 Open Canvas", url: `https://t.me/Crocodilegameebot/CROCO?startapp=${chatId}_${drawerId}_${startTime}_${mainMsgId}` }]]
-                        }));
-                        fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
+            setInterval(async () => {
+                const currentData = canvas.toDataURL('image/jpeg', 0.8);
+                if (currentData === lastCanvasData) return; 
+                
+                if (gameIsActive && lastSentPhotoId) {
+                    const imgUrl = await uploadImage(currentData);
+                    if (imgUrl) {
+                        sendBotCommand(`IMG_UPDATE|${lastSentPhotoId}|${mainMsgId}|${drawerName}|${imgUrl}`);
                         lastCanvasData = currentData;
-                        
-                    } else if (keepDrawing && window.finalMessageId) {
-                        const file = dataURLtoFile(currentData, 'drawing.jpg');
-                        const editData = new FormData();
-                        editData.append('chat_id', chatId);
-                        editData.append('message_id', window.finalMessageId);
-                        editData.append('media', JSON.stringify({
-                            type: 'photo', media: 'attach://drawing', 
-                            caption: `🎨 <b>Final Masterpiece!</b>\nWord was: <b>${window.finalWord}</b>`, 
-                            parse_mode: 'HTML'
-                        }));
-                        editData.append('drawing', file);
-                        fetch(`https://api.telegram.org/bot${window.TG_BOT_TOKEN}/editMessageMedia`, {method: 'POST', body: editData});
+                    }
+                } else if (keepDrawing && window.finalMessageId) {
+                    const imgUrl = await uploadImage(currentData);
+                    if (imgUrl) {
+                        sendBotCommand(`IMG_FINAL_EDIT|${window.finalMessageId}|${window.finalWord}|${imgUrl}`);
                         lastCanvasData = currentData;
                     }
                 }
